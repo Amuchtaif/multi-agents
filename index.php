@@ -39,7 +39,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="assets/css/style.css">
+    <link rel="stylesheet" href="assets/css/style.css?v=<?= @filemtime(__DIR__ . '/assets/css/style.css') ?: time() ?>">
 
     <!-- Three.js & OrbitControls (Local with CDN fallback) -->
     <script src="assets/vendor/three.min.js"></script>
@@ -71,13 +71,13 @@
         <div class="hidden lg:flex items-center gap-2">
             <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-white/5 font-mono text-xs shadow-sm">
                 <span class="text-slate-500 dark:text-slate-400 text-[10px] uppercase font-sans font-semibold">Agents:</span>
-                <span id="stat-total-agents" class="font-bold text-slate-900 dark:text-white">4</span>
+                <span id="stat-total-agents" class="font-bold text-slate-900 dark:text-white">-</span>
                 <span class="text-slate-300 dark:text-slate-600">|</span>
                 <span class="text-emerald-600 dark:text-emerald-400 text-[10px] uppercase font-sans font-semibold flex items-center gap-1">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-green"></span>
                     Kerja:
                 </span>
-                <span id="stat-working-agents" class="font-bold text-emerald-600 dark:text-emerald-400">3</span>
+                <span id="stat-working-agents" class="font-bold text-emerald-600 dark:text-emerald-400">-</span>
             </div>
 
             <div id="card-token-metrics" 
@@ -230,6 +230,9 @@
                         </div>
                         <div id="hud-agent-role" class="text-xs text-slate-500 dark:text-slate-400 font-medium">Role / Department</div>
                         <div id="hud-agent-location" class="text-[10px] font-medium mt-0.5"></div>
+                        <div id="hud-agent-project" class="hidden text-[10px] text-amber-600 dark:text-amber-400 font-mono mt-0.5 truncate">
+                            <i class="fa-solid fa-folder-tree mr-1 text-[9px]"></i><span class="project-path"></span>
+                        </div>
                     </div>
                     <button onclick="window.app.closeAgentQuickHud()" class="text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs p-1">
                         <i class="fa-solid fa-xmark"></i>
@@ -280,7 +283,7 @@
             </div>
 
             <!-- 3D Navigation Controls Hint (HUD Overlay bottom-center) -->
-            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3.5 py-1 rounded-full border border-slate-200 dark:border-white/10 text-[11px] text-slate-600 dark:text-slate-400 pointer-events-none flex items-center gap-3 font-medium shadow-sm">
+            <div id="canvas-3d-hint" class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-3.5 py-1 rounded-full border border-slate-200 dark:border-white/10 text-[11px] text-slate-600 dark:text-slate-400 pointer-events-none flex items-center gap-3 font-medium shadow-sm">
                 <span><i class="fa-solid fa-computer-mouse text-blue-500 dark:text-cyan-400 mr-1"></i> Klik meja untuk fokus</span>
                 <span>•</span>
                 <span><i class="fa-solid fa-hand text-indigo-500 dark:text-indigo-400 mr-1"></i> Drag untuk putar 360°</span>
@@ -299,10 +302,18 @@
                     <i class="fa-solid fa-list-check text-indigo-600 dark:text-indigo-400 text-sm"></i>
                     <h2 class="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">Backlog & Penugasan</h2>
                 </div>
-                <button onclick="window.app.openCreateTaskModal('ide_nanti')"
-                        class="px-2 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-[11px] font-semibold text-white transition-colors flex items-center gap-1 shadow-sm">
-                    <i class="fa-solid fa-plus text-[10px]"></i> Tugas
-                </button>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="window.app.openDeleteAllTasksModal()"
+                            id="btn-delete-all-tasks"
+                            class="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 text-[11px] font-semibold transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                            title="Hapus semua tugas di seluruh backlog">
+                        <i class="fa-solid fa-trash-can text-[10px]"></i> Hapus
+                    </button>
+                    <button onclick="window.app.openCreateTaskModal('ide_nanti')"
+                            class="px-2 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-[11px] font-semibold text-white transition-colors flex items-center gap-1 shadow-sm cursor-pointer">
+                        <i class="fa-solid fa-plus text-[10px]"></i> Tugas
+                    </button>
+                </div>
             </div>
 
             <!-- Categorized Task Lists -->
@@ -464,6 +475,26 @@
                             <option value="deepseek-r1">deepseek-r1 (Chain-of-Thought)</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- Local Working Directory -->
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                            <i class="fa-solid fa-folder-tree text-amber-500 mr-1"></i> Direktori Kerja Proyek Lokal (Working Directory)
+                        </label>
+                        <span class="text-[10px] text-slate-400">Target Folder Proyek</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" name="working_directory" list="local-projects-datalist" placeholder="Pilih atau ketik path, contoh: /var/www/html/churros-webapp" 
+                               class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
+                        <datalist id="local-projects-datalist">
+                            <!-- Populated dynamically -->
+                        </datalist>
+                    </div>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                        Agent ini akan menjalankan inspect, perintah shell (git, test, build), dan melaporkan hasil pekerjaannya langsung di direktori lokal tersebut.
+                    </p>
                 </div>
 
                 <!-- Station / Desk Coordinate Presets in 3D -->
@@ -704,6 +735,18 @@
                     <option value="IDLE">IDLE (Standby menunggu input)</option>
                     <option value="PAUSED">PAUSED (Ditangguhkan sementara)</option>
                 </select>
+            </div>
+
+            <!-- Working Directory -->
+            <div class="mb-4">
+                <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <i class="fa-solid fa-folder-tree text-amber-500 mr-1"></i> Direktori Kerja Proyek Lokal
+                    </label>
+                    <span id="insp-working-dir-status" class="text-[10px] text-slate-400"></span>
+                </div>
+                <input type="text" id="insp-working-directory" list="local-projects-datalist" placeholder="Contoh: /var/www/html/churros-webapp (kosongkan jika agent umum)"
+                       class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
             </div>
 
             <!-- Functions list -->
@@ -1035,11 +1078,47 @@
         </div>
     </div>
 
+    <!-- MODAL: CONFIRM DELETE ALL TASKS -->
+    <div id="modal-confirm-delete-all-tasks" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop" onclick="if(event.target === this) window.app.closeDeleteAllTasksModal()">
+        <div class="glass-panel-elevated rounded-2xl w-full max-w-md border border-rose-500/30 p-6 modal-content-animated shadow-2xl bg-white dark:bg-slate-900 text-left">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-12 h-12 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-600 dark:text-rose-400 text-xl shrink-0">
+                    <i class="fa-solid fa-list-check"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-base text-slate-900 dark:text-white">Hapus Semua Tugas Backlog?</h3>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Tindakan ini permanen dan tidak dapat dibatalkan</p>
+                </div>
+            </div>
+
+            <div class="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 rounded-xl p-3.5 mb-5 text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
+                <p class="font-semibold mb-1">⚠️ Perhatian Khusus:</p>
+                <ul class="list-disc list-inside space-y-1 text-[11px] text-rose-700 dark:text-rose-300">
+                    <li>Seluruh daftar tugas (Deadline Dekat, Nunggu Owner, Ide/Nanti) akan dihapus secara permanen dari database.</li>
+                    <li>Riwayat hasil eksekusi Real AI dan laporan pekerjaan tugas terkait akan dibersihkan.</li>
+                    <li>Status tugas aktif pada setiap AI Agent akan dikembalikan ke posisi <strong>Standby</strong>.</li>
+                </ul>
+            </div>
+
+            <div class="flex items-center justify-end gap-3">
+                <button type="button" onclick="window.app.closeDeleteAllTasksModal()"
+                        class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+                    Batal
+                </button>
+                <button type="button" id="btn-confirm-delete-all-tasks" onclick="window.app.confirmDeleteAllTasks()"
+                        class="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/25 flex items-center gap-1.5 transition-all cursor-pointer">
+                    <i class="fa-solid fa-trash-can"></i>
+                    <span>Ya, Hapus Semua Tugas</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toast-container" class="fixed top-20 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-    <!-- Application Script -->
-    <script src="assets/js/office-3d.js"></script>
-    <script src="assets/js/app.js"></script>
+    <!-- Application Script with Auto Cache Busting -->
+    <script src="assets/js/office-3d.js?v=<?= @filemtime(__DIR__ . '/assets/js/office-3d.js') ?: time() ?>"></script>
+    <script src="assets/js/app.js?v=<?= @filemtime(__DIR__ . '/assets/js/app.js') ?: time() ?>"></script>
 </body>
 </html>

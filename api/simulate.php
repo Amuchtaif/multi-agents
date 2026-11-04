@@ -23,16 +23,18 @@ try {
         ]);
     }
 
-    // Filter active agents: agents that are NOT 'PAUSED'
-    $activeAgents = array_values(array_filter($agents, function($a) {
-        return $a['status'] !== 'PAUSED';
+    // Filter active working agents: agents that are strictly 'KERJA'
+    $workingAgents = array_values(array_filter($agents, function($a) {
+        return $a['status'] === 'KERJA';
     }));
 
-    if (empty($activeAgents)) {
+    if (empty($workingAgents)) {
         sendJsonResponse([
             'success' => true,
-            'is_paused' => true,
-            'message' => 'Seluruh agent sedang dalam status PAUSED (Ditangguhkan). Eksekusi AI dan simulasi dihentikan.'
+            'is_idle' => true,
+            'events' => [],
+            'simulated_agents' => [],
+            'message' => 'Tidak ada agent berstatus KERJA (seluruh agent sedang PAUSED atau IDLE). Simulasi dihentikan.'
         ]);
     }
 
@@ -40,17 +42,17 @@ try {
     $autoExec = getSystemSetting($pdo, 'auto_execution', '0') === '1';
     $realAiEnabled = getSystemSetting($pdo, 'real_ai_enabled', '1') === '1';
 
-    // 2. Real AI Auto-Execution if enabled & pending task exists
-    if ($autoExec && $realAiEnabled) {
-        $activeAgentIds = array_column($activeAgents, 'id');
-        $inClause = implode(',', array_map('intval', $activeAgentIds));
+    // 2. Real AI Auto-Execution if enabled & pending task exists for working agents
+    if ($autoExec && $realAiEnabled && !empty($workingAgents)) {
+        $workingAgentIds = array_column($workingAgents, 'id');
+        $inClause = implode(',', array_map('intval', $workingAgentIds));
 
         $taskStmt = $pdo->query("
-            SELECT id, assigned_agent_id 
+            SELECT id, title, assigned_agent_id 
             FROM tasks 
-            WHERE status = 'pending' 
+            WHERE (status = 'pending' OR (status = 'in_progress' AND (result_text IS NULL OR result_text = '')))
               AND (assigned_agent_id IS NULL OR assigned_agent_id IN ($inClause))
-            ORDER BY FIELD(priority, 'urgent', 'high', 'medium', 'low'), id ASC 
+            ORDER BY FIELD(status, 'in_progress', 'pending'), FIELD(priority, 'urgent', 'high', 'medium', 'low'), id ASC 
             LIMIT 1
         ");
         $pendingTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
@@ -69,7 +71,7 @@ try {
                     'agent_name' => $execRes['agent_name'],
                     'avatar_color' => $updatedAgent['avatar_color'] ?? '#3b82f6',
                     'type' => 'task_complete',
-                    'message' => "Real AI ({$execRes['model']}): Selesai memproses task #{$pendingTask['id']}",
+                    'message' => "Real AI ({$execRes['model']}): Selesai memproses task #{$pendingTask['id']} ('{$pendingTask['title']}')",
                     'token_delta' => $execRes['tokens'],
                     'time' => date('H:i:s')
                 ];
@@ -83,19 +85,15 @@ try {
                     'events' => [$event]
                 ]);
             } catch (Exception $aiErr) {
-                // Fall through to standard autonomous simulation
+                // Log error so it's not silently lost
+                error_log("Real AI Auto-Execution Error on task #{$pendingTask['id']}: " . $aiErr->getMessage());
             }
         }
     }
 
     // 3. Autonomous Multi-Agent Research & Activity Engine
-    // Filter agents actively in 'KERJA' status
-    $workingAgents = array_values(array_filter($activeAgents, function($a) {
-        return $a['status'] === 'KERJA';
-    }));
-
-    // If no agents are actively in KERJA, use all active agents (IDLE agents can do light activity)
-    $targetAgents = !empty($workingAgents) ? $workingAgents : $activeAgents;
+    // Target only agents that are actively in 'KERJA'
+    $targetAgents = $workingAgents;
 
     // Pick agents to process this tick (process working agents so none are left idle)
     // To ensure fair distribution, pick up to 2 agents, prioritizing the ones with fewest actions or random
@@ -157,29 +155,15 @@ try {
         $taskCompleted = false;
         if ($eventData['type'] === 'task_complete') {
             $taskCompleted = true;
-            if ($linkedTaskId) {
-                $updTask = $pdo->prepare("
-                    UPDATE tasks 
-                    SET status = 'completed', 
-                        result_text = ?, 
-                        updated_at = NOW() 
-                    WHERE id = ?
-                ");
-                $resultText = "### Laporan Hasil Riset & Analisis\n\n" .
-                    "**Dikerjakan oleh:** {$agent['name']} ({$agent['role']})\n" .
-                    "**Departemen:** {$agent['department']}\n" .
-                    "**Topik:** {$taskTitle}\n\n" .
-                    "#### Temuan Utama:\n" .
-                    "- Telah dilakukan evaluasi mendalam dan pengujian skenario secara komprehensif.\n" .
-                    "- Seluruh parameter performa, integritas data, dan arsitektur telah divalidasi.\n" .
-                    "- Rekomendasi implementasi siap diadopsi pada roadmap kantor virtual berikutnya.\n\n" .
-                    "*Status: Diselesaikan secara otomatis oleh Autonomous Research Engine.*";
-                $updTask->execute([$resultText, $linkedTaskId]);
-            }
+            // NOTE: We NEVER complete real tasks from the tasks table with mock simulation text!
+            // Real tasks in the `tasks` table are strictly completed by AIService::executeTask with real deliverables.
         }
 
         // Update agent record (Keep status KERJA, do NOT randomly flip to IDLE!)
-        $newCurrentTask = $taskCompleted ? "Selesai: " . mb_substr($taskTitle, 0, 30) . " (Standby)" : $agent['current_task'];
+        $newCurrentTask = $agent['current_task'];
+        if (!$linkedTaskId && $taskCompleted) {
+            $newCurrentTask = "Standby: " . mb_substr($taskTitle, 0, 30);
+        }
         $updAgent = $pdo->prepare("
             UPDATE agents 
             SET token_usage = token_usage + ?, 

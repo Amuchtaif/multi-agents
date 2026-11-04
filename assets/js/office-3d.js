@@ -43,81 +43,314 @@ class Office3D {
     }
 
     init() {
-        const width = this.container.clientWidth;
-        const height = this.container.clientHeight;
+        const width = this.container.clientWidth || 800;
+        const height = this.container.clientHeight || 600;
 
-        // 1. Scene & Background (Dynamic Theme)
-        this.scene = new THREE.Scene();
-        this.applyThemeColors();
+        try {
+            // 1. Scene & Background (Dynamic Theme)
+            this.scene = new THREE.Scene();
+            this.applyThemeColors();
 
-        // 2. Orthographic Camera (True Isometric Projection)
-        const aspect = width / height;
-        this.frustumSize = 26;
-        this.camera = new THREE.OrthographicCamera(
-            (this.frustumSize * aspect) / -2,
-            (this.frustumSize * aspect) / 2,
-            this.frustumSize / 2,
-            this.frustumSize / -2,
-            0.1,
-            1000
-        );
-        this.camera.position.copy(this.defaultCameraPos);
-        this.camera.lookAt(0, 0, 0);
+            // 2. Orthographic Camera (True Isometric Projection)
+            const aspect = width / height;
+            this.frustumSize = 26;
+            this.camera = new THREE.OrthographicCamera(
+                (this.frustumSize * aspect) / -2,
+                (this.frustumSize * aspect) / 2,
+                this.frustumSize / 2,
+                this.frustumSize / -2,
+                0.1,
+                1000
+            );
+            this.camera.position.copy(this.defaultCameraPos);
+            this.camera.lookAt(0, 0, 0);
 
-        // 3. Renderer with Photorealistic PBR Pipeline
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-        this.renderer.setSize(width, height);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // 3. Renderer with Photorealistic PBR Pipeline
+            this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            this.renderer.setSize(width, height);
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-        // PBR Color Management & Tone Mapping
-        if (THREE.sRGBEncoding) {
-            this.renderer.outputEncoding = THREE.sRGBEncoding;
+            // PBR Color Management & Tone Mapping
+            if (THREE.sRGBEncoding) {
+                this.renderer.outputEncoding = THREE.sRGBEncoding;
+            }
+            if (THREE.ACESFilmicToneMapping) {
+                this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                this.renderer.toneMappingExposure = this.currentTheme === 'light' ? 1.15 : 1.25;
+            }
+
+            // Soft Contact Shadows
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.container.appendChild(this.renderer.domElement);
+
+            // 4. Orbit Controls
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.06;
+            this.controls.maxPolarAngle = Math.PI / 2.15; // Don't look below floor
+            this.controls.minPolarAngle = Math.PI / 8;
+            this.controls.target.copy(this.targetLookAt);
+            this.controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN
+            };
+
+            // 5. Procedural Texture Generation
+            this.initProceduralTextures();
+
+            // 6. Lighting Setup
+            this.setupLighting();
+
+            // 7. Build Architectural Office Environment
+            this.buildOfficeEnvironment();
+
+            // 8. Initialize Lounge & Dynamic Rest Spots
+            this.initRestSpots();
+
+            // 9. Interactive Event Listeners
+            this.setupInteractions();
+
+            // 10. Animation Loop
+            this.clock = new THREE.Clock();
+            this.animate = this.animate.bind(this);
+            requestAnimationFrame(this.animate);
+
+            // Handle resize
+            window.addEventListener('resize', () => this.onResize());
+
+            this.webglAvailable = true;
+        } catch (glError) {
+            console.warn("⚠️ WebGL unavailable or GPU crashed. Activating 2D Virtual Office fallback:", glError);
+            this.webglAvailable = false;
+            this.init2DOffice();
         }
-        if (THREE.ACESFilmicToneMapping) {
-            this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = this.currentTheme === 'light' ? 1.15 : 1.25;
+    }
+
+    init2DOffice() {
+        this.webglAvailable = false;
+        this.container.innerHTML = '';
+        this.container.style.position = 'relative';
+        this.container.style.overflow = 'auto';
+
+        const hint = document.getElementById('canvas-3d-hint');
+        if (hint) hint.classList.add('hidden');
+
+        const isLight = this.currentTheme === 'light';
+        const bgClass = isLight ? 'bg-slate-100/90 text-slate-800' : 'bg-slate-900/95 text-slate-100';
+
+        const wrapper = document.createElement('div');
+        wrapper.id = 'office-2d-canvas-wrapper';
+        wrapper.className = `w-full h-full min-h-[500px] flex flex-col p-4 sm:p-6 ${bgClass} transition-colors select-none overflow-y-auto`;
+
+        wrapper.innerHTML = `
+            <!-- Fallback Banner -->
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs backdrop-blur-md shadow-sm">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                    <i class="fa-solid fa-layer-group text-amber-500 text-sm"></i>
+                    <span><strong>Virtual Office 2D Mode Aktif</strong> (Hardware WebGL browser sedang nonaktif/crash. Seluruh fungsi AI, multi-agent, task, & terminal berjalan 100% normal).</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.location.reload()" class="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 dark:text-amber-200 border border-amber-500/30 flex items-center gap-1 transition-all">
+                        <i class="fa-solid fa-rotate-right text-[10px]"></i> Muat Ulang 3D
+                    </button>
+                </div>
+            </div>
+
+            <!-- Floorplan Zones Grid -->
+            <div class="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+                <!-- Zone 1: Workstations Grid -->
+                <div class="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-white/10 p-4 bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm flex flex-col">
+                    <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 dark:border-white/5">
+                        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                            <i class="fa-solid fa-desktop text-blue-500"></i> Stasiun Kerja AI (Workstations)
+                        </div>
+                        <span id="2d-active-count-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold border border-emerald-500/20">
+                            0 Aktif
+                        </span>
+                    </div>
+
+                    <!-- Workstations Grid -->
+                    <div id="office-2d-workstations" class="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1 auto-rows-max overflow-y-auto max-h-[460px] pr-1">
+                        <!-- Populated dynamically by render2DAgents -->
+                    </div>
+                </div>
+
+                <!-- Zone 2: Ruang Rapat & Coffee Lounge -->
+                <div class="flex flex-col gap-4">
+                    <!-- Meeting & Brainstorming Room -->
+                    <div class="rounded-2xl border border-slate-200 dark:border-white/10 p-4 bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm">
+                        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                            <i class="fa-solid fa-users-rectangle text-indigo-500"></i> Ruang Rapat & Kolaborasi
+                        </div>
+                        <div class="p-3 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 text-center">
+                            <div class="text-[11px] font-semibold text-indigo-900 dark:text-indigo-300 mb-1 flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-chalkboard text-xs"></i> Whiteboard Orchestration & Proyek
+                            </div>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                                Sinkronisasi orkestrasi task otomatis dan eksekusi direktori lokal antar agent.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Coffee Lounge (IDLE Rest Area) -->
+                    <div class="flex-1 rounded-2xl border border-slate-200 dark:border-white/10 p-4 bg-white/70 dark:bg-slate-950/60 backdrop-blur-sm flex flex-col">
+                        <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-white/5">
+                            <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                <i class="fa-solid fa-mug-hot text-amber-500"></i> Coffee Lounge (Area Santai)
+                            </div>
+                            <span id="2d-lounge-count-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono font-bold border border-amber-500/20">
+                                0 Istirahat
+                            </span>
+                        </div>
+                        <div id="office-2d-lounge-list" class="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[220px]">
+                            <div class="text-center py-6 text-slate-400 text-xs">
+                                <i class="fa-solid fa-couch text-xl mb-1 text-slate-300 dark:text-slate-600"></i>
+                                <p class="text-[11px]">Semua agent sedang berada di meja kerja.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.container.appendChild(wrapper);
+    }
+
+    render2DAgents(agentList) {
+        if (!agentList) return;
+        this.rawAgentsList = agentList;
+
+        const grid = document.getElementById('office-2d-workstations');
+        const lounge = document.getElementById('office-2d-lounge-list');
+        const activeBadge = document.getElementById('2d-active-count-badge');
+        const loungeBadge = document.getElementById('2d-lounge-count-badge');
+
+        if (!grid) return;
+
+        grid.innerHTML = '';
+        let idleCount = 0;
+        let kerjaCount = 0;
+        let loungeHtml = '';
+
+        agentList.forEach(agent => {
+            const isSelected = this.selectedAgentId == agent.id;
+            const isIdle = agent.status === 'IDLE';
+            const isKerja = agent.status === 'KERJA';
+            if (isIdle) idleCount++;
+            if (isKerja) kerjaCount++;
+
+            const statusBg = isKerja
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                : (isIdle ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30' : 'bg-slate-500/10 text-slate-500 border-slate-500/30');
+
+            const statusDot = isKerja ? 'bg-emerald-500 animate-pulse' : (isIdle ? 'bg-amber-500' : 'bg-slate-400');
+
+            const projectBadge = agent.working_directory
+                ? `<div class="mt-2 flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 truncate" title="Target Direktori: ${agent.working_directory}">
+                       <i class="fa-solid fa-folder-tree text-[9px] shrink-0 text-amber-500"></i>
+                       <span class="font-mono truncate font-medium">${agent.working_directory.split('/').filter(Boolean).pop()}</span>
+                   </div>`
+                : '';
+
+            const borderHighlight = isSelected
+                ? 'border-blue-500 ring-2 ring-blue-500/30 dark:ring-blue-400/40 shadow-md'
+                : 'border-slate-200 dark:border-white/5 hover:border-blue-400/50';
+
+            const card = document.createElement('div');
+            card.id = `office-2d-agent-${agent.id}`;
+            card.className = `p-3 rounded-xl border bg-white dark:bg-slate-900/80 cursor-pointer transition-all flex flex-col justify-between ${borderHighlight}`;
+            card.onclick = () => this.selectAgent(agent.id, true);
+
+            card.innerHTML = `
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="flex items-center gap-2 truncate">
+                            <div class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white text-xs shrink-0 shadow-sm" style="background-color: ${agent.avatar_color || '#3b82f6'}">
+                                ${agent.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
+                            </div>
+                            <div class="truncate">
+                                <div class="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">${agent.name}</div>
+                                <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">${agent.role}</div>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 shrink-0 ${statusBg}">
+                            <span class="w-1.5 h-1.5 rounded-full ${statusDot}"></span>
+                            ${agent.status}
+                        </span>
+                    </div>
+
+                    <div class="text-[11px] text-slate-600 dark:text-slate-300 font-mono truncate px-2 py-1 rounded bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-white/5">
+                        <i class="fa-solid fa-terminal text-[9px] mr-1 text-slate-400"></i>${agent.current_task || 'Standby'}
+                    </div>
+
+                    ${projectBadge}
+                </div>
+            `;
+            grid.appendChild(card);
+
+            if (isIdle) {
+                loungeHtml += `
+                    <div onclick="window.app && window.app.selectAgentById(${agent.id})" class="p-2 rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-center justify-between cursor-pointer hover:border-amber-500/40 transition-all">
+                        <div class="flex items-center gap-2 truncate">
+                            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">${agent.name}</span>
+                        </div>
+                        <span class="text-[10px] text-amber-600 dark:text-amber-400 font-medium">Santai & Kopi</span>
+                    </div>
+                `;
+            }
+        });
+
+        if (activeBadge) activeBadge.textContent = `${kerjaCount} Kerja`;
+        if (loungeBadge) loungeBadge.textContent = `${idleCount} Istirahat`;
+
+        if (lounge) {
+            if (idleCount > 0) {
+                lounge.innerHTML = loungeHtml;
+            } else {
+                lounge.innerHTML = `
+                    <div class="text-center py-6 text-slate-400 text-xs">
+                        <i class="fa-solid fa-couch text-xl mb-1 text-slate-300 dark:text-slate-600"></i>
+                        <p class="text-[11px]">Semua agent sedang berada di meja kerja.</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    select2DAgent(id, triggerCallback = true) {
+        this.selectedAgentId = Number(id);
+
+        document.querySelectorAll('#office-2d-workstations > div').forEach(el => {
+            el.classList.remove('border-blue-500', 'ring-2', 'ring-blue-500/30', 'dark:ring-blue-400/40', 'shadow-md');
+            el.classList.add('border-slate-200', 'dark:border-white/5');
+        });
+
+        const activeEl = document.getElementById(`office-2d-agent-${id}`);
+        if (activeEl) {
+            activeEl.classList.remove('border-slate-200', 'dark:border-white/5');
+            activeEl.classList.add('border-blue-500', 'ring-2', 'ring-blue-500/30', 'dark:ring-blue-400/40', 'shadow-md');
         }
 
-        // Soft Contact Shadows
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        this.container.appendChild(this.renderer.domElement);
+        if (triggerCallback && typeof this.options.onAgentSelected === 'function' && this.rawAgentsList) {
+            const found = this.rawAgentsList.find(a => a.id == id);
+            if (found) {
+                this.options.onAgentSelected(found);
+            }
+        }
+    }
 
-        // 4. Orbit Controls
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.06;
-        this.controls.maxPolarAngle = Math.PI / 2.15; // Don't look below floor
-        this.controls.minPolarAngle = Math.PI / 8;
-        this.controls.target.copy(this.targetLookAt);
-        this.controls.mouseButtons = {
-            LEFT: THREE.MOUSE.ROTATE,
-            MIDDLE: THREE.MOUSE.DOLLY,
-            RIGHT: THREE.MOUSE.PAN
-        };
-
-        // 5. Procedural Texture Generation
-        this.initProceduralTextures();
-
-        // 6. Lighting Setup
-        this.setupLighting();
-
-        // 7. Build Architectural Office Environment
-        this.buildOfficeEnvironment();
-
-        // 8. Initialize Lounge & Dynamic Rest Spots
-        this.initRestSpots();
-
-        // 9. Interactive Event Listeners
-        this.setupInteractions();
-
-        // 10. Animation Loop
-        this.clock = new THREE.Clock();
-        this.animate = this.animate.bind(this);
-        requestAnimationFrame(this.animate);
-
-        // Handle resize
-        window.addEventListener('resize', () => this.onResize());
+    set2DAgentStatus(agentId, newStatus) {
+        if (this.rawAgentsList) {
+            const agent = this.rawAgentsList.find(a => a.id == agentId);
+            if (agent) {
+                agent.status = newStatus;
+                this.render2DAgents(this.rawAgentsList);
+            }
+        }
     }
 
     applyThemeColors() {
@@ -1337,6 +1570,22 @@ class Office3D {
     setTheme(newTheme) {
         if (this.currentTheme === newTheme) return;
         this.currentTheme = newTheme;
+
+        if (!this.webglAvailable) {
+            const wrapper = document.getElementById('office-2d-canvas-wrapper');
+            if (wrapper) {
+                if (newTheme === 'dark') {
+                    wrapper.classList.remove('bg-slate-100/90', 'text-slate-800');
+                    wrapper.classList.add('bg-slate-900/95', 'text-slate-100');
+                } else {
+                    wrapper.classList.remove('bg-slate-900/95', 'text-slate-100');
+                    wrapper.classList.add('bg-slate-100/90', 'text-slate-800');
+                }
+            }
+            if (this.rawAgentsList) this.render2DAgents(this.rawAgentsList);
+            return;
+        }
+
         const isLight = newTheme === 'light';
 
         this.applyThemeColors();
@@ -1420,6 +1669,11 @@ class Office3D {
     // ==========================================
 
     syncAgents(agentList) {
+        if (!this.webglAvailable) {
+            this.render2DAgents(agentList);
+            return;
+        }
+
         const currentIds = new Set(agentList.map(a => Number(a.id)));
 
         for (const [id, agentObj] of this.agents.entries()) {
@@ -2028,6 +2282,19 @@ class Office3D {
      * Updates an existing agent and handles WALKING TRANSITIONS between Desk & Rest Area!
      */
     updateAgentWorkstation(id, agent) {
+        if (!this.webglAvailable) {
+            if (this.rawAgentsList) {
+                const idx = this.rawAgentsList.findIndex(a => a.id == id);
+                if (idx !== -1) {
+                    this.rawAgentsList[idx] = agent;
+                } else {
+                    this.rawAgentsList.push(agent);
+                }
+                this.render2DAgents(this.rawAgentsList);
+            }
+            return;
+        }
+
         const agentUnit = this.agents.get(id);
         if (!agentUnit) return;
 
@@ -2181,6 +2448,11 @@ class Office3D {
     }
 
     setAgentStatus(agentId, newStatus) {
+        if (!this.webglAvailable) {
+            this.set2DAgentStatus(agentId, newStatus);
+            return;
+        }
+
         const id = Number(agentId);
         const agentUnit = this.agents.get(id);
         if (!agentUnit) return;
@@ -2343,6 +2615,11 @@ class Office3D {
     // ==========================================
 
     selectAgent(id, triggerCallback = true) {
+        if (!this.webglAvailable) {
+            this.select2DAgent(id, triggerCallback);
+            return;
+        }
+
         const numId = Number(id);
         if (this.selectedAgentId && this.agents.has(this.selectedAgentId)) {
             const prev = this.agents.get(this.selectedAgentId);
@@ -2374,6 +2651,15 @@ class Office3D {
     }
 
     resetCamera() {
+        if (!this.webglAvailable) {
+            this.selectedAgentId = null;
+            document.querySelectorAll('#office-2d-workstations > div').forEach(el => {
+                el.classList.remove('border-blue-500', 'ring-2', 'ring-blue-500/30', 'dark:ring-blue-400/40', 'shadow-md');
+                el.classList.add('border-slate-200', 'dark:border-white/5');
+            });
+            return;
+        }
+
         this.targetLookAt.set(0, 0, 0);
         this.currentLookAt.set(0, 0, 0);
         this.camera.position.copy(this.defaultCameraPos);
@@ -2391,16 +2677,19 @@ class Office3D {
     }
 
     toggleAutoRotate() {
+        if (!this.webglAvailable) return false;
         this.isAutoRotating = !this.isAutoRotating;
         return this.isAutoRotating;
     }
 
     zoomIn() {
+        if (!this.webglAvailable) return;
         this.camera.zoom = Math.min(3.5, this.camera.zoom * 1.25);
         this.camera.updateProjectionMatrix();
     }
 
     zoomOut() {
+        if (!this.webglAvailable) return;
         this.camera.zoom = Math.max(0.4, this.camera.zoom / 1.25);
         this.camera.updateProjectionMatrix();
     }

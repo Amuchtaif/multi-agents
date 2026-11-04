@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS `agents` (
     `name` VARCHAR(100) NOT NULL,
     `role` VARCHAR(100) NOT NULL,
     `department` VARCHAR(100) NOT NULL,
+    `working_directory` VARCHAR(500) NULL,
     `desk_x` FLOAT NOT NULL DEFAULT 0,
     `desk_z` FLOAT NOT NULL DEFAULT 0,
     `desk_rotation` FLOAT NOT NULL DEFAULT 0,

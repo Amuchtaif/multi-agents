@@ -9,8 +9,8 @@ header('Content-Type: application/json; charset=utf-8');
 $host = '127.0.0.1';
 $port = '3306';
 $dbName = 'kantor_virtual_hq';
-$username = 'root';
-$password = '';
+$username = 'amuchtaif';
+$password = 'qurmutun';
 
 try {
     // Connect to MySQL server first
@@ -40,12 +40,26 @@ try {
  * Ensures all required tables and initial seed data exist
  */
 function ensureTables(PDO $pdo) {
+    static $alreadyChecked = false;
+    if ($alreadyChecked) return;
+
+    try {
+        $tableCheck = $pdo->query("SHOW TABLES LIKE 'agents'")->fetch();
+        if ($tableCheck && !isset($_GET['migrate'])) {
+            $alreadyChecked = true;
+            return;
+        }
+    } catch (Exception $e) {}
+
+    $alreadyChecked = true;
+
     // 1. Agents table
     $pdo->exec("CREATE TABLE IF NOT EXISTS `agents` (
         `id` INT AUTO_INCREMENT PRIMARY KEY,
         `name` VARCHAR(100) NOT NULL,
         `role` VARCHAR(100) NOT NULL,
         `department` VARCHAR(100) NOT NULL,
+        `working_directory` VARCHAR(500) NULL,
         `desk_x` FLOAT NOT NULL DEFAULT 0,
         `desk_z` FLOAT NOT NULL DEFAULT 0,
         `desk_rotation` FLOAT NOT NULL DEFAULT 0,
@@ -113,6 +127,10 @@ function ensureTables(PDO $pdo) {
 
     try {
         $pdo->exec("ALTER TABLE `tasks` ADD COLUMN `result_text` TEXT NULL AFTER `due_date`");
+    } catch (Exception $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE `agents` ADD COLUMN `working_directory` VARCHAR(500) NULL AFTER `department`");
     } catch (Exception $e) {}
 
     // Auto-fix any deprecated or invalid Gemini model names in database

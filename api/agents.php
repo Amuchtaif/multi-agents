@@ -11,6 +11,10 @@ $input = getJsonInput();
 
 switch ($method) {
     case 'GET':
+        if (isset($_GET['action']) && $_GET['action'] === 'local_projects') {
+            handleListLocalProjects();
+            break;
+        }
         handleGetAgents($pdo);
         break;
 
@@ -109,6 +113,15 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
     $name = trim($input['name'] ?? '');
     $role = trim($input['role'] ?? '');
     $department = trim($input['department'] ?? 'General Engineering');
+    $workingDirectory = isset($input['working_directory']) ? trim($input['working_directory']) : null;
+    if (!empty($workingDirectory)) {
+        $real = realpath($workingDirectory);
+        if ($real && is_dir($real)) {
+            $workingDirectory = $real;
+        }
+    } else {
+        $workingDirectory = null;
+    }
     $model = trim($input['model'] ?? 'gemini-3-flash-preview');
     $temperature = isset($input['temperature']) ? (float)$input['temperature'] : 0.7;
     $systemPrompt = trim($input['system_prompt'] ?? "Kamu adalah AI Agent {$name} ({$role}). Lakukan tugas analitis dan kolaborasi secara mandiri.");
@@ -158,11 +171,11 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
 
         $stmt = $pdo->prepare("
             INSERT INTO agents 
-            (name, role, department, desk_x, desk_z, desk_rotation, status, current_task, avatar_color, model, temperature, system_prompt, action_count, token_usage, context_memory)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 4096)
+            (name, role, department, working_directory, desk_x, desk_z, desk_rotation, status, current_task, avatar_color, model, temperature, system_prompt, action_count, token_usage, context_memory)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 4096)
         ");
         $stmt->execute([
-            $name, $role, $department, $deskX, $deskZ, $deskRotation, $status, $currentTask, $avatarColor, $model, $temperature, $systemPrompt
+            $name, $role, $department, $workingDirectory, $deskX, $deskZ, $deskRotation, $status, $currentTask, $avatarColor, $model, $temperature, $systemPrompt
         ]);
 
         $agentId = (int)$pdo->lastInsertId();
@@ -185,11 +198,11 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
             INSERT INTO agent_logs (agent_id, log_type, message, details_json)
             VALUES (?, 'system', ?, ?)
         ");
-        $logMsg = "Agent baru '{$name}' ({$role}) berhasil didaftarkan di stasiun [X: {$deskX}, Z: {$deskZ}].";
+        $logMsg = "Agent baru '{$name}' ({$role}) berhasil didaftarkan di stasiun [X: {$deskX}, Z: {$deskZ}]" . ($workingDirectory ? " (Direktori: {$workingDirectory})" : "") . ".";
         $logStmt->execute([
             $agentId,
             $logMsg,
-            json_encode(['department' => $department, 'model' => $model])
+            json_encode(['department' => $department, 'model' => $model, 'working_directory' => $workingDirectory])
         ]);
 
         // Auto-create task if initial task is specified
@@ -198,7 +211,7 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
                 INSERT INTO tasks (title, category, assigned_agent_id, status, priority)
                 VALUES (?, 'deadline_dekat', ?, ?, 'high')
             ");
-            $initialTaskStatus = ($status === 'KERJA') ? 'in_progress' : 'pending';
+            $initialTaskStatus = 'pending';
             $taskStmt->execute([$currentTask, $agentId, $initialTaskStatus]);
             $newTaskId = (int)$pdo->lastInsertId();
 
@@ -226,6 +239,7 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
                 'name' => $name,
                 'role' => $role,
                 'department' => $department,
+                'working_directory' => $workingDirectory,
                 'desk_x' => $deskX,
                 'desk_z' => $deskZ,
                 'desk_rotation' => $deskRotation,
@@ -274,7 +288,20 @@ function handleUpdateAgent(PDO $pdo, ?array $input = null) {
     $updates = [];
     $params = [];
 
-    $fields = ['name', 'role', 'department', 'desk_x', 'desk_z', 'desk_rotation', 'status', 'current_task', 'avatar_color', 'model', 'temperature', 'system_prompt', 'action_count', 'token_usage', 'context_memory'];
+    if (array_key_exists('working_directory', $input)) {
+        $wd = trim($input['working_directory'] ?? '');
+        if (!empty($wd)) {
+            $real = realpath($wd);
+            if ($real && is_dir($real)) {
+                $wd = $real;
+            }
+        } else {
+            $wd = null;
+        }
+        $input['working_directory'] = $wd;
+    }
+
+    $fields = ['name', 'role', 'department', 'working_directory', 'desk_x', 'desk_z', 'desk_rotation', 'status', 'current_task', 'avatar_color', 'model', 'temperature', 'system_prompt', 'action_count', 'token_usage', 'context_memory'];
 
     foreach ($fields as $field) {
         if (array_key_exists($field, $input)) {
@@ -499,4 +526,57 @@ function handleDeleteAllAgents(PDO $pdo) {
         sendJsonResponse(['success' => false, 'error' => 'Gagal menghapus seluruh agent: ' . $e->getMessage()], 500);
     }
 }
+
+/**
+ * GET: Discover and list local project directories
+ */
+function handleListLocalProjects() {
+    $basePaths = [
+        '/var/www/html',
+        dirname(__DIR__, 2), // Parent directory
+    ];
+
+    $projects = [];
+    $scannedPaths = [];
+
+    foreach ($basePaths as $base) {
+        if (!is_dir($base)) continue;
+        $realBase = realpath($base);
+        if (in_array($realBase, $scannedPaths)) continue;
+        $scannedPaths[] = $realBase;
+
+        $dirs = glob(rtrim($realBase, '/') . '/*', GLOB_ONLYDIR) ?: [];
+        foreach ($dirs as $dir) {
+            $baseName = basename($dir);
+            if ($baseName[0] === '.' || $baseName === 'phpmyadmin') continue;
+
+            $hasGit = is_dir($dir . '/.git');
+            $hasPackage = file_exists($dir . '/package.json');
+            $hasComposer = file_exists($dir . '/composer.json');
+            $hasPython = file_exists($dir . '/requirements.txt') || file_exists($dir . '/pyproject.toml');
+
+            $type = 'Folder Proyek';
+            if ($hasPackage && $hasComposer) $type = 'Node.js & PHP';
+            elseif ($hasPackage) $type = 'Node.js / WebApp';
+            elseif ($hasComposer) $type = 'PHP / Backend';
+            elseif ($hasPython) $type = 'Python Project';
+            elseif ($hasGit) $type = 'Git Repository';
+
+            $projects[] = [
+                'path' => $dir,
+                'name' => $baseName,
+                'type' => $type,
+                'has_git' => $hasGit,
+                'is_current' => ($dir === realpath(__DIR__ . '/..'))
+            ];
+        }
+    }
+
+    sendJsonResponse([
+        'success' => true,
+        'total' => count($projects),
+        'data' => $projects
+    ]);
+}
+
 

@@ -7,6 +7,7 @@
 require_once __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
+$input = getJsonInput();
 
 switch ($method) {
     case 'GET':
@@ -14,6 +15,10 @@ switch ($method) {
         break;
 
     case 'POST':
+        if (isset($input['action']) && $input['action'] === 'delete_all') {
+            handleDeleteAllTasks($pdo);
+            break;
+        }
         handleCreateTask($pdo);
         break;
 
@@ -23,6 +28,12 @@ switch ($method) {
         break;
 
     case 'DELETE':
+        $action = $_GET['action'] ?? ($input['action'] ?? '');
+        $id = $_GET['id'] ?? ($input['id'] ?? null);
+        if ($action === 'all' || $action === 'delete_all' || $id === 'all') {
+            handleDeleteAllTasks($pdo);
+            break;
+        }
         handleDeleteTask($pdo);
         break;
 
@@ -266,6 +277,37 @@ function handleDeleteTask(PDO $pdo) {
 
     } catch (Exception $e) {
         sendJsonResponse(['success' => false, 'error' => 'Gagal menghapus tugas: ' . $e->getMessage()], 500);
+    }
+}
+
+/**
+ * DELETE: Delete all tasks from backlog
+ */
+function handleDeleteAllTasks(PDO $pdo) {
+    try {
+        $countStmt = $pdo->query("SELECT COUNT(*) FROM tasks");
+        $count = (int)$countStmt->fetchColumn();
+
+        // 1. Delete all tasks from database
+        $pdo->exec("DELETE FROM tasks");
+
+        // 2. Reset agents current_task to Standby
+        $pdo->exec("UPDATE agents SET current_task = 'Standby (Menunggu instruksi tugas)' WHERE status != 'PAUSED'");
+
+        // 3. Log activity to system logs
+        $logStmt = $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (NULL, 'system', ?, ?)");
+        $logStmt->execute([
+            "🗑️ Seluruh backlog penugasan ({$count} tugas) telah dibersihkan oleh pengguna.",
+            json_encode(['action' => 'delete_all_tasks', 'count' => $count])
+        ]);
+
+        sendJsonResponse([
+            'success' => true,
+            'message' => "Semua backlog ({$count} tugas) berhasil dihapus",
+            'deleted_count' => $count
+        ]);
+    } catch (Exception $e) {
+        sendJsonResponse(['success' => false, 'error' => 'Gagal menghapus semua tugas: ' . $e->getMessage()], 500);
     }
 }
 

@@ -30,26 +30,33 @@ class AppController {
     }
 
     async init() {
-        // 1. Apply theme
-        this.applyTheme(this.theme, false);
+        try {
+            // 1. Apply theme
+            this.applyTheme(this.theme, false);
 
-        // 2. Initialize 3D Isometric Virtual Office
-        this.init3DOffice();
+            // 2. Initialize 3D Isometric Virtual Office
+            this.init3DOffice();
 
-        // 3. Setup DOM event listeners
-        this.setupEventListeners();
+            // 3. Setup DOM event listeners
+            this.setupEventListeners();
 
-        // 4. Initial data fetch
-        await this.loadAgents();
-        await this.loadTasks();
-        await this.loadLogs();
-        await this.loadAISettings();
+            // 4. Initial data fetch (concurrent with Promise.allSettled)
+            await Promise.allSettled([
+                this.loadAgents(),
+                this.loadTasks(),
+                this.loadLogs(),
+                this.loadAISettings()
+            ]);
+            this.populateLocalProjectsDatalist();
 
-        // 5. Start Real-Time SSE stream
-        this.startSSE();
+            // 5. Start Real-Time SSE stream
+            this.startSSE();
 
-        // 6. Start background loop (handles both simulation and Real AI auto execution)
-        this.startSimulationLoop();
+            // 6. Start background loop (handles both simulation and Real AI auto execution)
+            this.startSimulationLoop();
+        } catch (initErr) {
+            console.error("FATAL ERROR IN APP INIT:", initErr);
+        }
     }
 
     // ==========================================
@@ -108,12 +115,16 @@ class AppController {
     // ==========================================
 
     init3DOffice() {
-        this.office3D = new Office3D('threejs-canvas-container', {
-            theme: this.theme,
-            onAgentSelected: (agentData) => {
-                this.handleAgentSelectedFrom3D(agentData);
-            }
-        });
+        try {
+            this.office3D = new Office3D('threejs-canvas-container', {
+                theme: this.theme,
+                onAgentSelected: (agentData) => {
+                    this.handleAgentSelectedFrom3D(agentData);
+                }
+            });
+        } catch (e) {
+            console.warn('Office 3D/2D init error:', e);
+        }
     }
 
     // ==========================================
@@ -373,10 +384,9 @@ class AppController {
     startSimulationLoop() {
         if (this.simulationTimer) clearInterval(this.simulationTimer);
         this.simulationTimer = setInterval(async () => {
-            // Stop if no agents or all agents are paused
+            // Stop if no agents or no working agents
             if (!this.agents || this.agents.length === 0) return;
             const hasWorkingAgent = this.agents.some(a => a.status === 'KERJA');
-            const allPaused = this.agents.every(a => a.status === 'PAUSED');
 
             // If in Real AI mode: check if auto backlog execution is requested
             if (this.aiMode === 'real_ai') {
@@ -386,36 +396,39 @@ class AppController {
                 }
             }
 
-            // If all agents are paused, don't tick simulation (saves CPU & prevents accidental updates)
-            if (allPaused) return;
+            // CRITICAL: If no agent is working (all are PAUSED or IDLE), DO NOT run simulation!
+            if (!hasWorkingAgent) return;
 
             // Autonomous Simulation & Multi-Agent Research Generator
             try {
                 const res = await fetch('api/simulate.php', { method: 'POST' });
                 const data = await res.json();
-                if (data.success) {
+                if (data.success && data.events && data.events.length > 0) {
                     let hasNewLogs = false;
                     let hasTaskComplete = false;
 
-                    const eventsToProcess = (data.events && Array.isArray(data.events) && data.events.length > 0)
-                        ? data.events
-                        : (data.event ? [data.event] : []);
-
-                    eventsToProcess.forEach(evt => {
-                        this.logs.unshift({
-                            id: evt.id,
-                            agent_id: evt.agent_id,
-                            agent_name: evt.agent_name,
-                            agent_avatar_color: evt.avatar_color,
-                            log_type: evt.type,
-                            message: evt.message,
-                            created_at: new Date().toISOString()
-                        });
-                        hasNewLogs = true;
+                    data.events.forEach(evt => {
+                        // Deduplicate: avoid adding if log with same ID already exists
+                        if (!this.logs.some(l => l.id === evt.id)) {
+                            this.logs.unshift({
+                                id: evt.id,
+                                agent_id: evt.agent_id,
+                                agent_name: evt.agent_name,
+                                agent_avatar_color: evt.avatar_color,
+                                log_type: evt.type,
+                                message: evt.message,
+                                created_at: new Date().toISOString()
+                            });
+                            hasNewLogs = true;
+                        }
                         if (evt.type === 'task_complete' || evt.task_completed) {
                             hasTaskComplete = true;
                         }
                     });
+
+                    if (this.logs.length > 100) {
+                        this.logs = this.logs.slice(0, 100);
+                    }
 
                     if (hasNewLogs) {
                         this.renderLogs();
@@ -455,8 +468,8 @@ class AppController {
         if (!this.agents || this.agents.length === 0) return;
 
         // Only run if at least one agent is actively in KERJA status
-        const hasWorkingAgent = this.agents.some(a => a.status === 'KERJA');
-        if (!hasWorkingAgent) return;
+        const workingAgentIds = this.agents.filter(a => a.status === 'KERJA').map(a => Number(a.id));
+        if (workingAgentIds.length === 0) return;
 
         const allTasks = [
             ...(this.tasks.deadline_dekat || []),
@@ -465,10 +478,9 @@ class AppController {
         ];
 
         // Prioritize tasks assigned to currently working agents
-        const workingAgentIds = this.agents.filter(a => a.status === 'KERJA').map(a => Number(a.id));
         let targetTask = allTasks.find(t => (t.status === 'pending' || t.status === 'in_progress') && t.assigned_agent_id && workingAgentIds.includes(Number(t.assigned_agent_id)));
         if (!targetTask) {
-            targetTask = allTasks.find(t => t.status === 'pending');
+            targetTask = allTasks.find(t => t.status === 'pending' && !t.assigned_agent_id);
         }
         if (!targetTask) return;
 
@@ -517,18 +529,24 @@ class AppController {
 
         this.agents.forEach(agent => {
             const isSelected = this.selectedAgent && this.selectedAgent.id == agent.id;
-            const statusColor = agent.status === 'KERJA' 
-                ? 'emerald' 
+            const statusColor = agent.status === 'KERJA'
+                ? 'emerald'
                 : (agent.status === 'IDLE' ? 'amber' : 'slate');
 
             const tokenFormatted = this.formatTokenCount(agent.token_usage);
             const memK = (agent.context_memory / 1024).toFixed(0) + 'k / 128k';
             const isRealAi = this.aiMode === 'real_ai';
 
+            const projectBadge = agent.working_directory
+                ? `<div class="flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20 mb-2 truncate" title="Target Direktori: ${agent.working_directory}">
+                       <i class="fa-solid fa-folder-tree text-[9px] shrink-0 text-amber-500"></i>
+                       <span class="font-mono truncate font-medium">${agent.working_directory.split('/').filter(Boolean).pop()}</span>
+                   </div>`
+                : '';
+
             const card = document.createElement('div');
-            card.className = `glass-card p-3 rounded-xl border flex flex-col justify-between transition-all cursor-pointer select-none min-w-[280px] max-w-[340px] flex-1 ${
-                isSelected ? 'selected' : ''
-            }`;
+            card.className = `glass-card p-3 rounded-xl border flex flex-col justify-between transition-all cursor-pointer select-none min-w-[280px] max-w-[340px] flex-1 ${isSelected ? 'selected' : ''
+                }`;
             card.onclick = () => this.selectAgentById(agent.id);
 
             card.innerHTML = `
@@ -554,6 +572,8 @@ class AppController {
                             ${agent.status}
                         </span>
                     </div>
+
+                    ${projectBadge}
 
                     <!-- Current Task snippet -->
                     <div class="bg-slate-50 dark:bg-slate-900/60 rounded-lg p-2 border border-slate-200/80 dark:border-white/5 mb-2.5">
@@ -600,7 +620,7 @@ class AppController {
                             <i class="fa-solid fa-sliders"></i>
                         </button>
                         <button class="text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 px-2 py-1 rounded-lg border border-slate-200 dark:border-white/10 transition-colors"
-                                title="${agent.status === 'KERJA' ? 'Jadikan IDLE' : 'Jadikan KERJA'}"
+                                title="${agent.status === 'KERJA' ? 'Hentikan / Pause Agent' : 'Jalankan / Aktifkan Agent'}"
                                 onclick="event.stopPropagation(); window.app.quickToggleAgentStatus(${agent.id})">
                             <i class="fa-solid ${agent.status === 'KERJA' ? 'fa-pause text-amber-500' : 'fa-play text-emerald-500'}"></i>
                         </button>
@@ -622,10 +642,9 @@ class AppController {
         if (!container) return;
 
         let html = `
-            <button class="px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                this.activeLogFilter === 'all'
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
+            <button class="px-2.5 py-1 rounded-full text-xs font-medium transition-all ${this.activeLogFilter === 'all'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
             }" onclick="window.app.setLogFilter('all')">
                 Semua (${this.logs.length})
             </button>
@@ -634,10 +653,9 @@ class AppController {
         this.agents.forEach(agent => {
             const isActive = this.activeLogFilter == agent.id;
             html += `
-                <button class="px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
-                    isActive
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
+                <button class="px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${isActive
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
                 }" onclick="window.app.setLogFilter(${agent.id})">
                     <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${agent.avatar_color || '#3b82f6'}"></span>
                     ${agent.name.split(' ')[0]}
@@ -908,11 +926,10 @@ class AppController {
             const prioBadge = priorityColors[task.priority] || priorityColors.medium;
 
             const card = document.createElement('div');
-            card.className = `p-2.5 rounded-lg border text-xs transition-all ${
-                isCompleted 
-                    ? 'bg-slate-100/60 dark:bg-slate-900/30 border-slate-200/60 dark:border-white/5 opacity-60' 
+            card.className = `p-2.5 rounded-lg border text-xs transition-all ${isCompleted
+                    ? 'bg-slate-100/60 dark:bg-slate-900/30 border-slate-200/60 dark:border-white/5 opacity-60'
                     : 'bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/90 border-slate-200 dark:border-white/10 shadow-sm'
-            }`;
+                }`;
 
             card.innerHTML = `
                 <div class="flex items-start gap-2">
@@ -928,37 +945,35 @@ class AppController {
 
                         <div class="flex items-center justify-between gap-1 mt-2 text-[10px]">
                             <div class="flex items-center gap-1.5 flex-wrap">
-                                ${
-                                    task.agent_name 
-                                        ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 text-slate-600 dark:text-slate-300">
+                                ${task.agent_name
+                    ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-white/5 text-slate-600 dark:text-slate-300">
                                              <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${task.agent_avatar_color || '#3b82f6'}"></span>
                                              ${task.agent_name.split(' ')[0]}
                                            </span>`
-                                        : `<span class="text-slate-400 dark:text-slate-500 italic">Belum diassign</span>`
-                                }
+                    : `<span class="text-slate-400 dark:text-slate-500 italic">Belum diassign</span>`
+                }
                                 <span class="px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${prioBadge}">
                                     ${task.priority}
                                 </span>
                             </div>
 
                             <div class="flex items-center gap-1 shrink-0">
-                                ${
-                                    !isCompleted 
-                                        ? `<button class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 flex items-center gap-1 transition-colors shadow-xs"
+                                ${!isCompleted
+                    ? `<button class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 flex items-center gap-1 transition-colors shadow-xs"
                                                    title="Eksekusi tugas ini dengan Real AI"
                                                    onclick="event.stopPropagation(); window.app.executeTaskWithAI(${task.id})">
                                                <i class="fa-solid fa-wand-magic-sparkles text-[9px] text-indigo-500"></i>
                                                <span>AI Run</span>
                                            </button>`
-                                        : (task.result_text 
-                                            ? `<button class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 transition-colors shadow-xs"
+                    : (task.result_text
+                        ? `<button class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-1 transition-colors shadow-xs"
                                                        title="Lihat hasil eksekusi Real AI"
                                                        onclick="event.stopPropagation(); window.app.viewTaskAIResult(${task.id})">
                                                    <i class="fa-solid fa-file-lines text-[9px]"></i>
                                                    <span>Hasil AI</span>
                                                </button>`
-                                            : '')
-                                }
+                        : '')
+                }
                                 <button class="text-slate-400 hover:text-rose-500 transition-colors p-0.5"
                                         title="Hapus Tugas"
                                         onclick="window.app.deleteTask(${task.id})">
@@ -1002,6 +1017,60 @@ class AppController {
             }
         } catch (e) {
             console.error('Error deleting task:', e);
+        }
+    }
+
+    openDeleteAllTasksModal() {
+        if (!this.taskCounts || this.taskCounts.total === 0) {
+            this.showToast('Belum ada tugas di backlog untuk dihapus', 'info');
+            return;
+        }
+        const modal = document.getElementById('modal-confirm-delete-all-tasks');
+        if (modal) modal.classList.remove('hidden');
+    }
+
+    closeDeleteAllTasksModal() {
+        const modal = document.getElementById('modal-confirm-delete-all-tasks');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async confirmDeleteAllTasks() {
+        const btn = document.getElementById('btn-confirm-delete-all-tasks');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-xs"></i> <span>Menghapus...</span>`;
+        }
+
+        try {
+            const res = await fetch('api/tasks.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'delete_all' })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                this.closeDeleteAllTasksModal();
+                this.tasks = { deadline_dekat: [], nunggu_owner: [], ide_nanti: [] };
+                this.taskCounts = { total: 0, pending: 0, completed: 0, deadline_dekat: 0, nunggu_owner: 0, ide_nanti: 0 };
+                this.renderTasks();
+                this.updateGlobalHeaderStats();
+
+                await this.loadAgents();
+                await this.loadLogs();
+
+                this.showToast(`🗑️ ${data.message || 'Semua backlog berhasil dihapus'}`, 'success');
+            } else {
+                alert('Gagal menghapus tugas: ' + (data.error || 'Terjadi kesalahan'));
+            }
+        } catch (e) {
+            console.error('Error deleting all tasks:', e);
+            alert('Kesalahan jaringan saat menghapus semua tugas');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-trash-can"></i> <span>Ya, Hapus Semua Tugas</span>`;
+            }
         }
     }
 
@@ -1055,11 +1124,22 @@ class AppController {
 
         const statusEl = document.getElementById('hud-agent-status');
         statusEl.textContent = agent.status;
-        statusEl.className = `px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-            agent.status === 'KERJA' 
-                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' 
+        statusEl.className = `px-2 py-0.5 rounded text-[10px] font-bold uppercase ${agent.status === 'KERJA'
+                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                 : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
-        }`;
+            }`;
+
+        const projEl = document.getElementById('hud-agent-project');
+        if (projEl) {
+            if (agent.working_directory) {
+                projEl.classList.remove('hidden');
+                const span = projEl.querySelector('.project-path');
+                if (span) span.textContent = agent.working_directory;
+                projEl.title = `Direktori Proyek: ${agent.working_directory}`;
+            } else {
+                projEl.classList.add('hidden');
+            }
+        }
     }
 
     showToast(message, type = 'info') {
@@ -1067,11 +1147,10 @@ class AppController {
         if (!container) return;
 
         const toast = document.createElement('div');
-        toast.className = `pointer-events-auto px-4 py-2.5 rounded-xl border shadow-lg text-xs font-medium flex items-center gap-2 transform transition-all duration-300 translate-y-2 opacity-0 ${
-            type === 'warning'
+        toast.className = `pointer-events-auto px-4 py-2.5 rounded-xl border shadow-lg text-xs font-medium flex items-center gap-2 transform transition-all duration-300 translate-y-2 opacity-0 ${type === 'warning'
                 ? 'bg-amber-500/90 text-white border-amber-400 shadow-amber-500/20'
                 : (type === 'success' ? 'bg-emerald-600/90 text-white border-emerald-500 shadow-emerald-500/20' : 'bg-slate-900/90 text-white border-slate-700')
-        }`;
+            }`;
         toast.innerHTML = message;
         container.appendChild(toast);
 
@@ -1117,6 +1196,16 @@ class AppController {
         document.getElementById('insp-actions').textContent = agent.action_count;
         document.getElementById('insp-system-prompt').value = agent.system_prompt || '';
 
+        const workingDirInput = document.getElementById('insp-working-directory');
+        if (workingDirInput) {
+            workingDirInput.value = agent.working_directory || '';
+        }
+        const workingDirStatus = document.getElementById('insp-working-dir-status');
+        if (workingDirStatus) {
+            workingDirStatus.textContent = agent.working_directory ? 'Aktif: ' + agent.working_directory : 'Tidak diatur (General)';
+        }
+        this.populateLocalProjectsDatalist();
+
         const funcsContainer = document.getElementById('insp-functions-container');
         funcsContainer.innerHTML = '';
         const funcs = agent.functions || ['web_search', 'code_analysis'];
@@ -1140,6 +1229,9 @@ class AppController {
         const agentId = this.selectedAgent.id;
         const newStatus = document.getElementById('insp-status-select').value;
         const newPrompt = document.getElementById('insp-system-prompt').value;
+        const newWorkingDir = document.getElementById('insp-working-directory')
+            ? document.getElementById('insp-working-directory').value.trim()
+            : null;
 
         // Optimistic live walking transition
         if (this.office3D) {
@@ -1154,7 +1246,8 @@ class AppController {
                 body: JSON.stringify({
                     id: agentId,
                     status: newStatus,
-                    system_prompt: newPrompt
+                    system_prompt: newPrompt,
+                    working_directory: newWorkingDir
                 })
             });
             const data = await res.json();
@@ -1174,9 +1267,9 @@ class AppController {
         const agent = this.agents.find(a => a.id == agentId);
         if (!agent) return;
         const prevStatus = agent.status;
-        const newStatus = prevStatus === 'KERJA' ? 'IDLE' : 'KERJA';
+        const newStatus = (prevStatus === 'KERJA') ? 'PAUSED' : 'KERJA';
 
-        // 1. Optimistic instant visual update: avatar starts walking immediately!
+        // 1. Optimistic instant visual update
         agent.status = newStatus;
         if (this.office3D) {
             this.office3D.setAgentStatus(agentId, newStatus);
@@ -1186,10 +1279,10 @@ class AppController {
         this.updateGlobalHeaderStats();
 
         // 2. Toast notification
-        if (newStatus === 'IDLE') {
-            this.showToast(`🛋️ <strong>${agent.name}</strong> berpindah ke Coffee Lounge untuk istirahat (IDLE)`, 'warning');
+        if (newStatus === 'PAUSED') {
+            this.showToast(`⏸️ <strong>${agent.name}</strong> berhasil dihentikan (PAUSED). Aktivitas agent dinonaktifkan.`, 'warning');
         } else {
-            this.showToast(`💻 <strong>${agent.name}</strong> kembali ke meja kerja dan aktif mengetik (KERJA)`, 'success');
+            this.showToast(`▶️ <strong>${agent.name}</strong> kembali aktif bekerja (KERJA)`, 'success');
         }
 
         // 3. Persist to MySQL Backend
@@ -1411,6 +1504,26 @@ class AppController {
     // MODALS: CREATE AGENT & CREATE TASK
     // ==========================================
 
+    async populateLocalProjectsDatalist() {
+        const datalist = document.getElementById('local-projects-datalist');
+        if (!datalist) return;
+        try {
+            const res = await fetch('api/agents.php?action=local_projects');
+            const data = await res.json();
+            if (data.success && data.data) {
+                datalist.innerHTML = '';
+                data.data.forEach(proj => {
+                    const opt = document.createElement('option');
+                    opt.value = proj.path;
+                    opt.label = `${proj.name} (${proj.type}${proj.has_git ? ' • Git' : ''})`;
+                    datalist.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.warn('Failed to load local projects list:', e);
+        }
+    }
+
     openCreateAgentModal() {
         const modal = document.getElementById('modal-create-agent');
         if (!modal) return;
@@ -1418,6 +1531,7 @@ class AppController {
 
         document.getElementById('form-create-agent').reset();
         document.getElementById('temp-slider-val').textContent = '0.7';
+        this.populateLocalProjectsDatalist();
     }
 
     closeCreateAgentModal() {
@@ -1432,6 +1546,7 @@ class AppController {
         const name = form.name.value.trim();
         const role = form.role.value.trim();
         const department = form.department.value;
+        const workingDirectory = form.working_directory ? form.working_directory.value.trim() : '';
         const model = form.model.value;
         const temperature = parseFloat(form.temperature.value);
         const avatarColor = form.avatar_color.value;
@@ -1463,6 +1578,7 @@ class AppController {
             name,
             role,
             department,
+            working_directory: workingDirectory,
             model,
             temperature,
             avatar_color: avatarColor,
@@ -2279,8 +2395,8 @@ class AppController {
         }
 
         try {
-            const url = this.activeLogFilter !== 'all' 
-                ? `api/logs.php?agent_id=${this.activeLogFilter}` 
+            const url = this.activeLogFilter !== 'all'
+                ? `api/logs.php?agent_id=${this.activeLogFilter}`
                 : 'api/logs.php';
 
             const res = await fetch(url, { method: 'DELETE' });
@@ -2311,7 +2427,16 @@ class AppController {
     }
 }
 
-// Instantiate on window load
-window.addEventListener('DOMContentLoaded', () => {
-    window.app = new AppController();
-});
+// Robust bootstrap: initialize whether DOMContentLoaded already fired or pending
+function bootstrapApp() {
+    if (!window.app) {
+        console.log("BOOTSTRAPPING APP NOW...");
+        window.app = new AppController();
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapApp);
+} else {
+    bootstrapApp();
+}
