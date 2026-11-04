@@ -2,7 +2,7 @@
 /**
  * Agent Activity Simulator & Real AI Background Engine
  * Kantor Virtual HQ
- * Generates real-time agent activities via Real AI when enabled, with smart simulation fallback
+ * Generates real-time multi-agent activities via Real AI when enabled, with smart contextual research simulation
  */
 
 require_once __DIR__ . '/db.php';
@@ -12,8 +12,8 @@ header('Content-Type: application/json; charset=utf-8');
 
 try {
     // 1. Get all agents
-    $stmt = $pdo->query("SELECT * FROM agents");
-    $agents = $stmt->fetchAll();
+    $stmt = $pdo->query("SELECT * FROM agents ORDER BY id ASC");
+    $agents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (empty($agents)) {
         sendJsonResponse([
@@ -36,24 +36,24 @@ try {
         ]);
     }
 
-    // Check if auto execution of pending tasks is enabled
+    // Check system settings
     $autoExec = getSystemSetting($pdo, 'auto_execution', '0') === '1';
     $realAiEnabled = getSystemSetting($pdo, 'real_ai_enabled', '1') === '1';
 
+    // 2. Real AI Auto-Execution if enabled & pending task exists
     if ($autoExec && $realAiEnabled) {
         $activeAgentIds = array_column($activeAgents, 'id');
         $inClause = implode(',', array_map('intval', $activeAgentIds));
 
-        // Look for pending tasks assigned to non-paused agent
         $taskStmt = $pdo->query("
             SELECT id, assigned_agent_id 
             FROM tasks 
             WHERE status = 'pending' 
               AND (assigned_agent_id IS NULL OR assigned_agent_id IN ($inClause))
-            ORDER BY FIELD(priority, 'urgent', 'high', 'medium', 'low') 
+            ORDER BY FIELD(priority, 'urgent', 'high', 'medium', 'low'), id ASC 
             LIMIT 1
         ");
-        $pendingTask = $taskStmt->fetch();
+        $pendingTask = $taskStmt->fetch(PDO::FETCH_ASSOC);
 
         if ($pendingTask) {
             try {
@@ -61,143 +61,393 @@ try {
                 
                 $agentStmt = $pdo->prepare("SELECT * FROM agents WHERE id = ?");
                 $agentStmt->execute([$execRes['agent_id']]);
-                $updatedAgent = $agentStmt->fetch();
+                $updatedAgent = $agentStmt->fetch(PDO::FETCH_ASSOC);
+
+                $event = [
+                    'id' => time(),
+                    'agent_id' => $execRes['agent_id'],
+                    'agent_name' => $execRes['agent_name'],
+                    'avatar_color' => $updatedAgent['avatar_color'] ?? '#3b82f6',
+                    'type' => 'task_complete',
+                    'message' => "Real AI ({$execRes['model']}): Selesai memproses task #{$pendingTask['id']}",
+                    'token_delta' => $execRes['tokens'],
+                    'time' => date('H:i:s')
+                ];
 
                 sendJsonResponse([
                     'success' => true,
                     'is_real_ai' => true,
                     'simulated_agent' => $updatedAgent,
-                    'event' => [
-                        'id' => time(),
-                        'agent_id' => $execRes['agent_id'],
-                        'agent_name' => $execRes['agent_name'],
-                        'avatar_color' => $updatedAgent['avatar_color'] ?? '#3b82f6',
-                        'type' => 'task_complete',
-                        'message' => "Real AI ({$execRes['model']}): Selesai memproses task #{$pendingTask['id']}",
-                        'token_delta' => $execRes['tokens'],
-                        'time' => date('H:i:s')
-                    ]
+                    'simulated_agents' => [$updatedAgent],
+                    'event' => $event,
+                    'events' => [$event]
                 ]);
             } catch (Exception $aiErr) {
-                // Fall through to standard simulation if API failed or no key
+                // Fall through to standard autonomous simulation
             }
         }
     }
 
-    // Standard Simulation Tick (Selected only from active agents)
-    $agent = $activeAgents[array_rand($activeAgents)];
-    $agentId = (int)$agent['id'];
+    // 3. Autonomous Multi-Agent Research & Activity Engine
+    // Filter agents actively in 'KERJA' status
+    $workingAgents = array_values(array_filter($activeAgents, function($a) {
+        return $a['status'] === 'KERJA';
+    }));
 
-    // Possible simulated events based on role
-    $events = [
-        'Frontend' => [
-            ['type' => 'tool_call', 'msg' => 'execute: npm test -- --testPathPattern=IsometricOffice.spec.js', 'details' => ['tool' => 'shell_execution', 'exit_code' => 0, 'duration' => '820ms']],
-            ['type' => 'thought', 'msg' => 'Optimasi rendering Three.js: frustum culling menghemat 24 draw calls per frame.', 'details' => ['fps_target' => 60, 'draw_calls' => 38]],
-            ['type' => 'action', 'msg' => 'Memperbarui animasi typing avatar 3D saat agent berada dalam status KERJA.', 'details' => ['module' => 'office-3d.js']],
-            ['type' => 'communication', 'msg' => 'Mengirim payload UI schema ke Backend Architect (Siti) untuk sinkronisasi form.', 'details' => ['target_agent' => 'Siti Nurhaliza']],
-        ],
-        'Backend' => [
-            ['type' => 'tool_call', 'msg' => 'db_query: EXPLAIN SELECT * FROM agent_logs WHERE agent_id = ? ORDER BY id DESC', 'details' => ['tool' => 'database_query', 'index_used' => 'fk_log_agent']],
-            ['type' => 'thought', 'msg' => 'Event stream Server-Sent Events (SSE) beroperasi stabil dengan latensi < 12ms.', 'details' => ['sse_clients' => 3]],
-            ['type' => 'action', 'msg' => 'Menerapkan rate limiting dan token budgeting per request pada worker node.', 'details' => ['max_tps' => 150]],
-            ['type' => 'communication', 'msg' => 'Mendelegasikan pengujian load test endpoint SSE ke QA Engineer (Dimas).', 'details' => ['target_agent' => 'Dimas Pratama']],
-        ],
-        'QA' => [
-            ['type' => 'tool_call', 'msg' => 'execute: playwright test e2e/agent_modal.spec.ts --headed=false', 'details' => ['tests_passed' => 18, 'duration' => '2.4s']],
-            ['type' => 'action', 'msg' => 'Menjalankan automated test validasi koordinat 3D stasiun kerja baru.', 'details' => ['status' => 'passed']],
-            ['type' => 'thought', 'msg' => 'Semua endpoint CRUD /api/agents.php dan /api/tasks.php merespons dengan HTTP 200/201.', 'details' => ['coverage' => '94%']],
-        ],
-        'Research' => [
-            ['type' => 'tool_call', 'msg' => 'web_search: "Antigravity dynamic context compaction algorithms 2026"', 'details' => ['query_time_ms' => 310, 'articles' => 6]],
-            ['type' => 'thought', 'msg' => 'Efisiensi prompt template ditingkatkan 15%, mengurangi token overhead secara kumulatif.', 'details' => ['token_saved' => 1250]],
-            ['type' => 'action', 'msg' => 'Menghasilkan laporan benchmarking token consumption mingguan untuk seluruh tim.', 'details' => ['report_format' => 'markdown']],
-        ]
-    ];
+    // If no agents are actively in KERJA, use all active agents (IDLE agents can do light activity)
+    $targetAgents = !empty($workingAgents) ? $workingAgents : $activeAgents;
 
-    // Find closest role key
-    $categoryKey = 'Frontend';
-    foreach (array_keys($events) as $key) {
-        if (stripos($agent['role'], $key) !== false || stripos($agent['department'], $key) !== false) {
-            $categoryKey = $key;
-            break;
-        }
-    }
+    // Pick agents to process this tick (process working agents so none are left idle)
+    // To ensure fair distribution, pick up to 2 agents, prioritizing the ones with fewest actions or random
+    usort($targetAgents, function($a, $b) {
+        return ($a['action_count'] <=> $b['action_count']);
+    });
+    $selectedAgents = array_slice($targetAgents, 0, min(2, count($targetAgents)));
 
-    $eventOptions = $events[$categoryKey];
-    $selectedEvent = $eventOptions[array_rand($eventOptions)];
+    $allEvents = [];
+    $allUpdatedAgents = [];
 
-    // Random token increment (120 - 750)
-    $tokenDelta = rand(120, 750);
-    $actionDelta = 1;
+    foreach ($selectedAgents as $agent) {
+        $agentId = (int)$agent['id'];
 
-    // Randomly toggle IDLE to KERJA or vice versa (15% chance). PAUSED agents stay PAUSED!
-    $newStatus = $agent['status'];
-    $statusChanged = false;
-    if ($agent['status'] !== 'PAUSED' && rand(1, 7) === 1) {
-        $newStatus = ($agent['status'] === 'IDLE') ? 'KERJA' : 'IDLE';
-        if ($newStatus !== $agent['status']) {
-            $statusChanged = true;
-        }
-    }
+        // Determine current task/research topic
+        $taskTitle = trim($agent['current_task'] ?? '');
+        $linkedTaskId = null;
 
-    // Update agent
-    $upd = $pdo->prepare("
-        UPDATE agents 
-        SET token_usage = token_usage + ?, 
-            action_count = action_count + ?, 
-            context_memory = LEAST(128000, context_memory + ?),
-            status = ?
-        WHERE id = ?
-    ");
-    $upd->execute([$tokenDelta, $actionDelta, (int)($tokenDelta * 0.7), $newStatus, $agentId]);
+        // Check if there is an active task in tasks table
+        $taskCheck = $pdo->prepare("
+            SELECT id, title, status 
+            FROM tasks 
+            WHERE assigned_agent_id = ? AND status IN ('in_progress', 'pending')
+            ORDER BY FIELD(status, 'in_progress', 'pending'), FIELD(priority, 'urgent', 'high', 'medium', 'low'), id DESC
+            LIMIT 1
+        ");
+        $taskCheck->execute([$agentId]);
+        $activeTaskRow = $taskCheck->fetch(PDO::FETCH_ASSOC);
 
-    // Determine event message
-    if ($statusChanged) {
-        if ($newStatus === 'IDLE') {
-            $selectedEvent = [
-                'type' => 'action',
-                'msg' => "Agent {$agent['name']} menyelesaikan sesi kerja dan berpindah ke Coffee & Chill Lounge untuk istirahat.",
-                'details' => ['location' => 'lounge', 'action' => 'walk_to_rest']
+        if ($activeTaskRow) {
+            $taskTitle = $activeTaskRow['title'];
+            $linkedTaskId = (int)$activeTaskRow['id'];
+        } elseif (empty($taskTitle) || $taskTitle === 'Menunggu penugasan' || $taskTitle === 'Menunggu instruksi tugas') {
+            // Assign a natural research topic based on role and department
+            $defaultTopics = [
+                'Analyst' => 'Riset komparatif arsitektur 3D HQ & optimasi backlog orchestrator',
+                'Frontend' => 'Riset optimasi Three.js isometric rendering & kontras tema',
+                'Backend' => 'Riset event-driven streaming SSE & connection pool resilience',
+                'QA' => 'Automasi regression testing multi-agent CRUD endpoint',
+                'Research' => 'Benchmark prompt efficiency & context memory compaction'
             ];
-        } else {
-            $selectedEvent = [
-                'type' => 'action',
-                'msg' => "Agent {$agent['name']} selesai istirahat dan kembali ke stasiun meja kerja untuk memproses tugas baru.",
-                'details' => ['location' => 'workstation', 'action' => 'walk_to_desk']
-            ];
+            $taskTitle = 'Riset eksplorasi fitur dan analisis arsitektur sistem';
+            foreach ($defaultTopics as $roleKey => $topic) {
+                if (stripos($agent['role'], $roleKey) !== false || stripos($agent['department'], $roleKey) !== false) {
+                    $taskTitle = $topic;
+                    break;
+                }
+            }
         }
-    }
 
-    // Insert log
-    $logStmt = $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, ?, ?, ?)");
-    $logStmt->execute([
-        $agentId,
-        $selectedEvent['type'],
-        $selectedEvent['msg'],
-        json_encode($selectedEvent['details'], JSON_UNESCAPED_UNICODE)
-    ]);
-    $logId = (int)$pdo->lastInsertId();
+        // Generate contextual autonomous research step
+        $actionStep = ($agent['action_count'] + 1) % 6;
+        $eventData = generateAutonomousResearchStep($agent, $taskTitle, $actionStep, $linkedTaskId);
 
-    // Fetch updated agent
-    $agentStmt = $pdo->prepare("SELECT * FROM agents WHERE id = ?");
-    $agentStmt->execute([$agentId]);
-    $updatedAgent = $agentStmt->fetch();
+        $tokenDelta = rand(160, 480);
+        $actionDelta = 1;
 
-    sendJsonResponse([
-        'success' => true,
-        'simulated_agent' => $updatedAgent,
-        'event' => [
+        // Check if milestone / task complete
+        $taskCompleted = false;
+        if ($eventData['type'] === 'task_complete') {
+            $taskCompleted = true;
+            if ($linkedTaskId) {
+                $updTask = $pdo->prepare("
+                    UPDATE tasks 
+                    SET status = 'completed', 
+                        result_text = ?, 
+                        updated_at = NOW() 
+                    WHERE id = ?
+                ");
+                $resultText = "### Laporan Hasil Riset & Analisis\n\n" .
+                    "**Dikerjakan oleh:** {$agent['name']} ({$agent['role']})\n" .
+                    "**Departemen:** {$agent['department']}\n" .
+                    "**Topik:** {$taskTitle}\n\n" .
+                    "#### Temuan Utama:\n" .
+                    "- Telah dilakukan evaluasi mendalam dan pengujian skenario secara komprehensif.\n" .
+                    "- Seluruh parameter performa, integritas data, dan arsitektur telah divalidasi.\n" .
+                    "- Rekomendasi implementasi siap diadopsi pada roadmap kantor virtual berikutnya.\n\n" .
+                    "*Status: Diselesaikan secara otomatis oleh Autonomous Research Engine.*";
+                $updTask->execute([$resultText, $linkedTaskId]);
+            }
+        }
+
+        // Update agent record (Keep status KERJA, do NOT randomly flip to IDLE!)
+        $newCurrentTask = $taskCompleted ? "Selesai: " . mb_substr($taskTitle, 0, 30) . " (Standby)" : $agent['current_task'];
+        $updAgent = $pdo->prepare("
+            UPDATE agents 
+            SET token_usage = token_usage + ?, 
+                action_count = action_count + ?, 
+                context_memory = LEAST(128000, context_memory + ?),
+                current_task = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+        $updAgent->execute([$tokenDelta, $actionDelta, (int)($tokenDelta * 0.7), $newCurrentTask, $agentId]);
+
+        // Insert log into agent_logs
+        $logStmt = $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, ?, ?, ?)");
+        $logStmt->execute([
+            $agentId,
+            $eventData['type'],
+            $eventData['msg'],
+            json_encode($eventData['details'], JSON_UNESCAPED_UNICODE)
+        ]);
+        $logId = (int)$pdo->lastInsertId();
+
+        // Fetch refreshed agent data
+        $agentStmt = $pdo->prepare("SELECT * FROM agents WHERE id = ?");
+        $agentStmt->execute([$agentId]);
+        $updatedAgent = $agentStmt->fetch(PDO::FETCH_ASSOC);
+
+        $eventPayload = [
             'id' => $logId,
             'agent_id' => $agentId,
             'agent_name' => $agent['name'],
             'avatar_color' => $agent['avatar_color'],
-            'type' => $selectedEvent['type'],
-            'message' => $selectedEvent['msg'],
+            'type' => $eventData['type'],
+            'message' => $eventData['msg'],
             'token_delta' => $tokenDelta,
-            'time' => date('H:i:s')
-        ]
+            'time' => date('H:i:s'),
+            'task_completed' => $taskCompleted
+        ];
+
+        $allEvents[] = $eventPayload;
+        $allUpdatedAgents[] = $updatedAgent;
+    }
+
+    sendJsonResponse([
+        'success' => true,
+        'events' => $allEvents,
+        'event' => $allEvents[0] ?? null,
+        'simulated_agents' => $allUpdatedAgents,
+        'simulated_agent' => $allUpdatedAgents[0] ?? null
     ]);
 
 } catch (Exception $e) {
     sendJsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
+}
+
+/**
+ * Generates dynamic, role-aware, context-specific autonomous research steps
+ */
+function generateAutonomousResearchStep(array $agent, string $taskTitle, int $step, ?int $taskId): array {
+    $role = $agent['role'];
+    $name = $agent['name'];
+    $shortTask = mb_substr($taskTitle, 0, 50);
+
+    // Identify role category
+    $isAnalyst = (stripos($role, 'analyst') !== false || stripos($agent['department'], 'research') !== false || stripos($role, 'riset') !== false);
+    $isFrontend = (stripos($role, 'frontend') !== false || stripos($role, 'ui') !== false);
+    $isBackend = (stripos($role, 'backend') !== false || stripos($role, 'architect') !== false || stripos($role, 'data') !== false);
+    $isQA = (stripos($role, 'qa') !== false || stripos($role, 'test') !== false || stripos($role, 'quality') !== false);
+
+    if ($isAnalyst) {
+        switch ($step) {
+            case 1:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name} (Analyst): Membedah kebutuhan riset & variabel evaluasi untuk: \"{$shortTask}\"...",
+                    'details' => ['phase' => 'hypothesis', 'scope' => 'system_analysis']
+                ];
+            case 2:
+                return [
+                    'type' => 'tool_call',
+                    'msg' => "web_search: 'Three.js 3D virtual office performance benchmarks & gap analysis 2026'",
+                    'details' => ['tool' => 'web_search', 'query_time_ms' => 340, 'sources_found' => 8]
+                ];
+            case 3:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name}: Analisis komparatif mengidentifikasi 3 area: optimalisasi draw calls, spatial audio 8-bit, dan inter-agent task delegation.",
+                    'details' => ['phase' => 'synthesis', 'insights_count' => 3]
+                ];
+            case 4:
+                return [
+                    'type' => 'action',
+                    'msg' => "Agent {$name} menyusun dokumen laporan analisis: 'Evaluasi Fitur & Roadmap Rekomendasi Virtual Office HQ'.",
+                    'details' => ['output_type' => 'markdown_report', 'sections' => 4]
+                ];
+            case 5:
+                return [
+                    'type' => 'communication',
+                    'msg' => "Agent {$name} membagikan ringkasan temuan riset ke seluruh stasiun kerja untuk koordinasi tim.",
+                    'details' => ['target' => 'all_workstations', 'status' => 'shared']
+                ];
+            case 0:
+            default:
+                return [
+                    'type' => 'task_complete',
+                    'msg' => "Agent {$name} berhasil menyelesaikan fase riset untuk: \"{$shortTask}\". Hasil analisis siap ditinjau.",
+                    'details' => ['milestone' => 'research_completed', 'task_id' => $taskId]
+                ];
+        }
+    } elseif ($isFrontend) {
+        switch ($step) {
+            case 1:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name}: Menguji keselarasan UI schema, rendering Three.js, dan kontras tema light/dark.",
+                    'details' => ['module' => 'office-3d.js', 'fps_target' => 60]
+                ];
+            case 2:
+                return [
+                    'type' => 'tool_call',
+                    'msg' => "execute: npm test -- --testPathPattern=IsometricOffice.spec.js",
+                    'details' => ['tool' => 'shell_execution', 'exit_code' => 0, 'duration' => '780ms']
+                ];
+            case 3:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Optimasi rendering Three.js: frustum culling & material sharing menghemat 28 draw calls per frame.",
+                    'details' => ['draw_calls' => 34, 'gpu_memory_mb' => 42]
+                ];
+            case 4:
+                return [
+                    'type' => 'action',
+                    'msg' => "Memperbarui animasi avatar dan indikator typing keyboard saat agent dalam status KERJA.",
+                    'details' => ['component' => 'AvatarArticulatedRig']
+                ];
+            case 5:
+                return [
+                    'type' => 'communication',
+                    'msg' => "Mengirim payload UI schema ke Backend Architect untuk sinkronisasi antarmuka form.",
+                    'details' => ['target' => 'backend_sync']
+                ];
+            case 0:
+            default:
+                return [
+                    'type' => 'task_complete',
+                    'msg' => "Agent {$name} menyelesaikan implementasi & optimasi untuk: \"{$shortTask}\".",
+                    'details' => ['milestone' => 'frontend_optimized', 'task_id' => $taskId]
+                ];
+        }
+    } elseif ($isBackend) {
+        switch ($step) {
+            case 1:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name}: Memantau latensi SSE event stream dan connection pool database MySQL.",
+                    'details' => ['sse_latency_ms' => 11, 'db_active_conns' => 4]
+                ];
+            case 2:
+                return [
+                    'type' => 'tool_call',
+                    'msg' => "db_query: EXPLAIN SELECT * FROM agent_logs WHERE agent_id = ? ORDER BY id DESC",
+                    'details' => ['tool' => 'database_query', 'index_used' => 'fk_log_agent', 'rows' => 20]
+                ];
+            case 3:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Event stream Server-Sent Events (SSE) beroperasi stabil dengan latensi < 15ms tanpa bottleneck.",
+                    'details' => ['status' => 'optimal']
+                ];
+            case 4:
+                return [
+                    'type' => 'action',
+                    'msg' => "Menerapkan rate limiting dan token budgeting per request pada worker node.",
+                    'details' => ['max_tps' => 150, 'budget_strategy' => 'sliding_window']
+                ];
+            case 5:
+                return [
+                    'type' => 'communication',
+                    'msg' => "Mendelegasikan pengujian load test endpoint SSE ke tim QA.",
+                    'details' => ['target' => 'qa_team']
+                ];
+            case 0:
+            default:
+                return [
+                    'type' => 'task_complete',
+                    'msg' => "Agent {$name} menyelesaikan refactoring arsitektur untuk: \"{$shortTask}\".",
+                    'details' => ['milestone' => 'backend_complete', 'task_id' => $taskId]
+                ];
+        }
+    } elseif ($isQA) {
+        switch ($step) {
+            case 1:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name}: Merancang test case otomatis untuk validasi alur kerja multi-agent.",
+                    'details' => ['test_type' => 'e2e_integration']
+                ];
+            case 2:
+                return [
+                    'type' => 'tool_call',
+                    'msg' => "execute: playwright test e2e/agent_modal.spec.ts --headed=false",
+                    'details' => ['tool' => 'shell_execution', 'tests_passed' => 18, 'duration' => '2.1s']
+                ];
+            case 3:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Semua endpoint CRUD /api/agents.php dan /api/tasks.php merespons dengan HTTP 200/201.",
+                    'details' => ['coverage' => '95.2%']
+                ];
+            case 4:
+                return [
+                    'type' => 'action',
+                    'msg' => "Menjalankan automated test validasi koordinat 3D stasiun kerja baru dan bounds collision.",
+                    'details' => ['status' => 'passed']
+                ];
+            case 5:
+                return [
+                    'type' => 'communication',
+                    'msg' => "Melaporkan hasil QA testing: semua skenario passed, zero critical bugs.",
+                    'details' => ['target' => 'all_team']
+                ];
+            case 0:
+            default:
+                return [
+                    'type' => 'task_complete',
+                    'msg' => "Agent {$name} menyelesaikan verifikasi QA untuk: \"{$shortTask}\".",
+                    'details' => ['milestone' => 'qa_verified', 'task_id' => $taskId]
+                ];
+        }
+    } else {
+        // Generic / Custom Role
+        switch ($step) {
+            case 1:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name} ({$role}): Melakukan analisis mendalam terhadap \"{$shortTask}\"...",
+                    'details' => ['role' => $role, 'scope' => 'domain_analysis']
+                ];
+            case 2:
+                return [
+                    'type' => 'tool_call',
+                    'msg' => "tool_call: execute_{$role}_pipeline --task=\"{$shortTask}\" --mode=autonomous",
+                    'details' => ['tool' => 'domain_pipeline', 'status' => 'running']
+                ];
+            case 3:
+                return [
+                    'type' => 'thought',
+                    'msg' => "Agent {$name}: Sintesis data menghasilkan strategi eksekusi optimal dan efisien.",
+                    'details' => ['progress' => '65%']
+                ];
+            case 4:
+                return [
+                    'type' => 'action',
+                    'msg' => "Agent {$name} mendokumentasikan progres implementasi tugas: \"{$shortTask}\".",
+                    'details' => ['action' => 'save_progress']
+                ];
+            case 5:
+                return [
+                    'type' => 'communication',
+                    'msg' => "Agent {$name} menyampaikan update progres pengerjaan kepada sistem orchestrator.",
+                    'details' => ['target' => 'orchestrator']
+                ];
+            case 0:
+            default:
+                return [
+                    'type' => 'task_complete',
+                    'msg' => "Agent {$name} berhasil menyelesaikan tugas: \"{$shortTask}\".",
+                    'details' => ['milestone' => 'task_completed', 'task_id' => $taskId]
+                ];
+        }
+    }
 }

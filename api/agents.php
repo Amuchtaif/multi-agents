@@ -192,6 +192,29 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
             json_encode(['department' => $department, 'model' => $model])
         ]);
 
+        // Auto-create task if initial task is specified
+        if (!empty($currentTask) && $currentTask !== 'Menunggu penugasan' && $currentTask !== 'Menunggu instruksi tugas') {
+            $taskStmt = $pdo->prepare("
+                INSERT INTO tasks (title, category, assigned_agent_id, status, priority)
+                VALUES (?, 'deadline_dekat', ?, ?, 'high')
+            ");
+            $initialTaskStatus = ($status === 'KERJA') ? 'in_progress' : 'pending';
+            $taskStmt->execute([$currentTask, $agentId, $initialTaskStatus]);
+            $newTaskId = (int)$pdo->lastInsertId();
+
+            if ($status === 'KERJA') {
+                $startLog = $pdo->prepare("
+                    INSERT INTO agent_logs (agent_id, log_type, message, details_json)
+                    VALUES (?, 'action', ?, ?)
+                ");
+                $startLog->execute([
+                    $agentId,
+                    "Agent {$name} mulai aktif bekerja: \"{$currentTask}\"",
+                    json_encode(['action' => 'start_work', 'task_id' => $newTaskId, 'role' => $role], JSON_UNESCAPED_UNICODE)
+                ]);
+            }
+        }
+
         $pdo->commit();
 
         sendJsonResponse([
@@ -297,6 +320,19 @@ function handleUpdateAgent(PDO $pdo, ?array $input = null) {
             $logStmt = $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'system', ?, ?)");
             $logMsg = "Status agent '{$existing['name']}' diperbarui dari {$existing['status']} menjadi {$input['status']}.";
             $logStmt->execute([$id, $logMsg, json_encode(['old_status' => $existing['status'], 'new_status' => $input['status']])]);
+
+            // If switched to KERJA, ensure active task exists in backlog
+            if ($input['status'] === 'KERJA') {
+                $taskTitle = !empty($input['current_task']) ? $input['current_task'] : $existing['current_task'];
+                if (!empty($taskTitle) && $taskTitle !== 'Menunggu penugasan' && $taskTitle !== 'Menunggu instruksi tugas') {
+                    $chkTask = $pdo->prepare("SELECT id FROM tasks WHERE assigned_agent_id = ? AND status = 'in_progress' LIMIT 1");
+                    $chkTask->execute([$id]);
+                    if (!$chkTask->fetch()) {
+                        $insTask = $pdo->prepare("INSERT INTO tasks (title, category, assigned_agent_id, status, priority) VALUES (?, 'deadline_dekat', ?, 'in_progress', 'high')");
+                        $insTask->execute([$taskTitle, $id]);
+                    }
+                }
+            }
         }
 
         $pdo->commit();

@@ -382,47 +382,72 @@ class AppController {
             if (this.aiMode === 'real_ai') {
                 const autoExec = this.aiSettings && (this.aiSettings.auto_execution === '1' || this.aiSettings.auto_execution === true);
                 if (autoExec && hasWorkingAgent && !this.isAutoExecutingRealAI) {
-                    await this.runRealAIAutoBacklogStep();
+                    this.runRealAIAutoBacklogStep();
                 }
-                return;
             }
 
             // If all agents are paused, don't tick simulation (saves CPU & prevents accidental updates)
             if (allPaused) return;
 
-            // Standard simulation tick (Mock Generator)
+            // Autonomous Simulation & Multi-Agent Research Generator
             try {
                 const res = await fetch('api/simulate.php', { method: 'POST' });
                 const data = await res.json();
-                if (data.success && data.event) {
-                    this.logs.unshift({
-                        id: data.event.id,
-                        agent_id: data.event.agent_id,
-                        agent_name: data.event.agent_name,
-                        agent_avatar_color: data.event.avatar_color,
-                        log_type: data.event.type,
-                        message: data.event.message,
-                        created_at: new Date().toISOString()
-                    });
-                    this.renderLogs();
+                if (data.success) {
+                    let hasNewLogs = false;
+                    let hasTaskComplete = false;
 
-                    const updated = data.simulated_agent;
-                    if (updated) {
+                    const eventsToProcess = (data.events && Array.isArray(data.events) && data.events.length > 0)
+                        ? data.events
+                        : (data.event ? [data.event] : []);
+
+                    eventsToProcess.forEach(evt => {
+                        this.logs.unshift({
+                            id: evt.id,
+                            agent_id: evt.agent_id,
+                            agent_name: evt.agent_name,
+                            agent_avatar_color: evt.avatar_color,
+                            log_type: evt.type,
+                            message: evt.message,
+                            created_at: new Date().toISOString()
+                        });
+                        hasNewLogs = true;
+                        if (evt.type === 'task_complete' || evt.task_completed) {
+                            hasTaskComplete = true;
+                        }
+                    });
+
+                    if (hasNewLogs) {
+                        this.renderLogs();
+                    }
+
+                    const agentsToUpdate = (data.simulated_agents && Array.isArray(data.simulated_agents) && data.simulated_agents.length > 0)
+                        ? data.simulated_agents
+                        : (data.simulated_agent ? [data.simulated_agent] : []);
+
+                    agentsToUpdate.forEach(updated => {
                         const idx = this.agents.findIndex(a => a.id == updated.id);
                         if (idx !== -1) {
                             this.agents[idx] = { ...this.agents[idx], ...updated };
-                            this.renderAgentCards();
-                            this.updateGlobalHeaderStats();
                             if (this.office3D) {
                                 this.office3D.updateAgentWorkstation(updated.id, this.agents[idx]);
                             }
                         }
+                    });
+
+                    if (agentsToUpdate.length > 0) {
+                        this.renderAgentCards();
+                        this.updateGlobalHeaderStats();
+                    }
+
+                    if (hasTaskComplete) {
+                        await this.loadTasks();
                     }
                 }
             } catch (e) {
                 console.warn('Simulation tick error:', e);
             }
-        }, 5000);
+        }, 3500);
     }
 
     async runRealAIAutoBacklogStep() {
@@ -438,12 +463,18 @@ class AppController {
             ...(this.tasks.nunggu_owner || []),
             ...(this.tasks.ide_nanti || [])
         ];
-        const pending = allTasks.find(t => t.status === 'pending');
-        if (!pending) return;
+
+        // Prioritize tasks assigned to currently working agents
+        const workingAgentIds = this.agents.filter(a => a.status === 'KERJA').map(a => Number(a.id));
+        let targetTask = allTasks.find(t => (t.status === 'pending' || t.status === 'in_progress') && t.assigned_agent_id && workingAgentIds.includes(Number(t.assigned_agent_id)));
+        if (!targetTask) {
+            targetTask = allTasks.find(t => t.status === 'pending');
+        }
+        if (!targetTask) return;
 
         this.isAutoExecutingRealAI = true;
         try {
-            await this.executeTaskWithAI(pending.id);
+            await this.executeTaskWithAI(targetTask.id);
         } catch (err) {
             console.warn('Auto Real AI backlog execution error:', err);
         } finally {

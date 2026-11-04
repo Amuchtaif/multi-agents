@@ -192,7 +192,7 @@ class AIService {
             UPDATE agents 
             SET token_usage = token_usage + ?, 
                 action_count = action_count + 1, 
-                current_task = 'Selesai: ' || ?, 
+                current_task = CONCAT('Selesai: ', ?), 
                 status = 'KERJA' 
             WHERE id = ?
         ");
