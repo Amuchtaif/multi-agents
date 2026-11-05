@@ -524,8 +524,17 @@
                     </div>
                 </div>
 
-                <!-- Avatar Color & Initial Status -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <!-- Gender, Avatar Color & Initial Status -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            <i class="fa-solid fa-venus-mars text-indigo-500 mr-1"></i> Jenis Karakter
+                        </label>
+                        <select name="gender" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
+                            <option value="male" selected>Laki-Laki (Pria)</option>
+                            <option value="female">Perempuan (Wanita)</option>
+                        </select>
+                    </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Warna Avatar & Meja</label>
                         <select name="avatar_color" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
@@ -727,14 +736,25 @@
                 </div>
             </div>
 
-            <!-- Status Control -->
-            <div class="mb-4">
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Operasional Agent</label>
-                <select id="insp-status-select" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
-                    <option value="KERJA">KERJA (Aktif memproses task & mengetik)</option>
-                    <option value="IDLE">IDLE (Standby menunggu input)</option>
-                    <option value="PAUSED">PAUSED (Ditangguhkan sementara)</option>
-                </select>
+            <!-- Status & Gender Control -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Status Operasional Agent</label>
+                    <select id="insp-status-select" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
+                        <option value="KERJA">KERJA (Aktif memproses task & mengetik)</option>
+                        <option value="IDLE">IDLE (Standby menunggu input)</option>
+                        <option value="PAUSED">PAUSED (Ditangguhkan sementara)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        <i class="fa-solid fa-venus-mars text-indigo-500 mr-1"></i> Jenis Karakter (Gender)
+                    </label>
+                    <select id="insp-gender-select" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
+                        <option value="male">Laki-Laki (Pria)</option>
+                        <option value="female">Perempuan (Wanita)</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Working Directory -->

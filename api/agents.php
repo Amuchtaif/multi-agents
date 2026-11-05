@@ -112,6 +112,8 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
 
     $name = trim($input['name'] ?? '');
     $role = trim($input['role'] ?? '');
+    $rawGender = strtolower(trim($input['gender'] ?? 'male'));
+    $gender = in_array($rawGender, ['female', 'perempuan', 'wanita']) ? 'female' : 'male';
     $department = trim($input['department'] ?? 'General Engineering');
     $workingDirectory = isset($input['working_directory']) ? trim($input['working_directory']) : null;
     if (!empty($workingDirectory)) {
@@ -171,11 +173,11 @@ function handleCreateAgent(PDO $pdo, ?array $input = null) {
 
         $stmt = $pdo->prepare("
             INSERT INTO agents 
-            (name, role, department, working_directory, desk_x, desk_z, desk_rotation, status, current_task, avatar_color, model, temperature, system_prompt, action_count, token_usage, context_memory)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 4096)
+            (name, role, gender, department, working_directory, desk_x, desk_z, desk_rotation, status, current_task, avatar_color, model, temperature, system_prompt, action_count, token_usage, context_memory)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 4096)
         ");
         $stmt->execute([
-            $name, $role, $department, $workingDirectory, $deskX, $deskZ, $deskRotation, $status, $currentTask, $avatarColor, $model, $temperature, $systemPrompt
+            $name, $role, $gender, $department, $workingDirectory, $deskX, $deskZ, $deskRotation, $status, $currentTask, $avatarColor, $model, $temperature, $systemPrompt
         ]);
 
         $agentId = (int)$pdo->lastInsertId();
@@ -301,7 +303,12 @@ function handleUpdateAgent(PDO $pdo, ?array $input = null) {
         $input['working_directory'] = $wd;
     }
 
-    $fields = ['name', 'role', 'department', 'working_directory', 'desk_x', 'desk_z', 'desk_rotation', 'status', 'current_task', 'avatar_color', 'model', 'temperature', 'system_prompt', 'action_count', 'token_usage', 'context_memory'];
+    if (array_key_exists('gender', $input)) {
+        $rawGender = strtolower(trim($input['gender'] ?? 'male'));
+        $input['gender'] = in_array($rawGender, ['female', 'perempuan', 'wanita']) ? 'female' : 'male';
+    }
+
+    $fields = ['name', 'role', 'gender', 'department', 'working_directory', 'desk_x', 'desk_z', 'desk_rotation', 'status', 'current_task', 'avatar_color', 'model', 'temperature', 'system_prompt', 'action_count', 'token_usage', 'context_memory'];
 
     foreach ($fields as $field) {
         if (array_key_exists($field, $input)) {

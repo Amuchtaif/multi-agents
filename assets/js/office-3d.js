@@ -1,3 +1,79 @@
+// ==========================================
+// SCANDINAVIAN ARCHITECTURAL COLOR PALETTE & WCAG CONTRAST SYSTEM
+// (Based on task-improve-office.md specification)
+// ==========================================
+const PALETTE = {
+    // Lingkungan
+    skyTop:      0xbfe0f2,
+    skyDark:     0x1e2633,
+    grass:       0x6fae45,
+    grassDark:   0x1f3a2a,
+    walkway:     0xcfc4ae,
+    // Struktur
+    floor:       0xc48d58,
+    floorDark:   0x2b3140,
+    wall:        0xe6ddc9,
+    wallDark:    0x3c4760,
+    trim:        0xcfc4ae,
+    trimDark:    0x4f5d7e,
+    glass:       0x8fc3d8,
+    glassDark:   0x2a3e5c,
+    frame:       0x3a4048,
+    // Objek
+    rack:        0x3b4860,
+    dark:        0x2a2d33,
+    screen:      0x2b4c7e,
+    plant:       0x3f8f3c,
+    pot:         0xd9cbb0,
+    lamp:        0x7fbf99,
+    wood:        0xd9c6a5,
+    sofa:        [0xf1eadc, 0x4c6489], // [0] krem oat, [1] biru-abu
+    accentChair: 0xe07b3a, // oranye
+    sage:        0x9ebfa8,
+    rugLounge:   0x6e93ab,
+    rugMeeting:  0x8c3a33,
+    accent:      { teal: 0x3fa796, amber: 0xe0a84b, coral: 0xe07a5f }
+};
+
+if (typeof window !== 'undefined') {
+    window.PALETTE = PALETTE;
+}
+
+/**
+ * Calculates WCAG 2.1 relative luminance for hex color, number, or THREE.Color
+ */
+function relLuminance(colorInput) {
+    if (colorInput && typeof colorInput === 'object' && typeof colorInput.getHex === 'function') {
+        return relLuminance(colorInput.getHex()); // getHex() mengembalikan sRGB
+    }
+    let r, g, b;
+    if (colorInput && typeof colorInput === 'object' && 'r' in colorInput) {
+        return relLuminance(colorInput.getHex ? colorInput.getHex() : ((Math.round(colorInput.r * 255) << 16) | (Math.round(colorInput.g * 255) << 8) | Math.round(colorInput.b * 255)));
+    } else {
+        const hex = typeof colorInput === 'number' ? colorInput : parseInt(String(colorInput).replace('#', '0x'), 16);
+        r = ((hex >> 16) & 255) / 255;
+        g = ((hex >> 8) & 255) / 255;
+        b = (hex & 255) / 255;
+    }
+    const toLinear = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+/**
+ * Calculates WCAG 2.1 contrast ratio between two colors (Target: >= 4.5:1 for text, >= 1.5:1 for objects)
+ */
+function contrastRatio(hexA, hexB) {
+    const l1 = relLuminance(hexA);
+    const l2 = relLuminance(hexB);
+    const [a, b] = [l1, l2].sort((x, y) => y - x);
+    return (a + 0.05) / (b + 0.05);
+}
+
+if (typeof window !== 'undefined') {
+    window.relLuminance = relLuminance;
+    window.contrastRatio = contrastRatio;
+}
+
 /**
  * Kantor Virtual HQ - 3D Isometric Virtual Office Engine
  * High-Fidelity Three.js Orthographic Isometric View
@@ -71,12 +147,16 @@ class Office3D {
             this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
             // PBR Color Management & Tone Mapping
-            if (THREE.sRGBEncoding) {
+            if (THREE.ColorManagement) {
+                THREE.ColorManagement.enabled = true;
+            }
+            if (THREE.SRGBColorSpace) {
+                this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+            } else if (THREE.sRGBEncoding) {
                 this.renderer.outputEncoding = THREE.sRGBEncoding;
             }
-            if (THREE.ACESFilmicToneMapping) {
-                this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-                this.renderer.toneMappingExposure = this.currentTheme === 'light' ? 1.15 : 1.25;
+            if (THREE.NoToneMapping !== undefined) {
+                this.renderer.toneMapping = THREE.NoToneMapping;
             }
 
             // Soft Contact Shadows
@@ -355,9 +435,8 @@ class Office3D {
 
     applyThemeColors() {
         const isLight = this.currentTheme === 'light';
-        const bgColor = isLight ? 0xe2e8f0 : 0x090d16;
-        this.scene.background = new THREE.Color(bgColor);
-        this.scene.fog = new THREE.FogExp2(bgColor, isLight ? 0.008 : 0.013);
+        this.scene.background = new THREE.Color(isLight ? PALETTE.skyTop : PALETTE.skyDark);
+        this.scene.fog = null;
     }
 
     // ==========================================
@@ -370,11 +449,16 @@ class Office3D {
         this.cachedTextures.codeEditor = this.generateCodeEditorTexture();
         this.cachedTextures.metricsDashboard = this.generateMetricsDashboardTexture();
         this.cachedTextures.presentationScreen = this.generatePresentationScreenTexture();
-        this.cachedTextures.decalLeadership = this.generateFloorDecalTexture('LEADERSHIP');
-        this.cachedTextures.decalMarketing = this.generateFloorDecalTexture('MARKETING & BUSINESS');
-        this.cachedTextures.decalLounge = this.generateFloorDecalTexture('LOUNGE');
+        this.cachedTextures.windowView = this.generateWindowViewTexture();
         this.cachedTextures.workBoard = this.generateWorkBoardTexture();
         this.cachedTextures.posterGreatWork = this.generateMotivationalPosterTexture();
+
+        // T2: Ensure all procedural textures are flagged with sRGB color space
+        Object.values(this.cachedTextures).forEach(t => {
+            if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace;
+            else if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
+            t.needsUpdate = true;
+        });
     }
 
     /**
@@ -389,81 +473,59 @@ class Office3D {
         const ctx = canvas.getContext('2d');
 
         if (isLight) {
-            // High-Contrast Natural Scandinavian European Oak Wood Parquet
-            // Rich warm hardwood undertone for clear architectural definition against white desks & walls
-            ctx.fillStyle = '#8c7b69'; // Deep warm wood seam underlay
+            // T3: Warm Natural Scandinavian European Oak Plank Flooring (Reference Palette)
+            ctx.fillStyle = '#8F5F33'; // Celah antar papan
             ctx.fillRect(0, 0, 1024, 1024);
-
-            const numCols = 8;
-            const numRows = 16;
-            const plankW = 1024 / numCols;
-            const plankH = 1024 / numRows;
-
-            for (let r = 0; r < numRows; r++) {
-                const rowOffset = (r % 2) * (plankW / 2);
-                for (let c = -1; c <= numCols; c++) {
-                    const px = c * plankW + rowOffset;
-                    const py = r * plankH;
-
-                    // Organic natural plank color shifts (warm European Oak: amber honey to soft walnut)
-                    const toneSeed = ((c * 19 + r * 37 + (c ^ r)) % 7) - 3;
-                    const redVal   = 220 + toneSeed * 4;
-                    const greenVal = 202 + toneSeed * 4;
-                    const blueVal  = 180 + toneSeed * 4;
-                    ctx.fillStyle = `rgb(${redVal}, ${greenVal}, ${blueVal})`;
+            const tones = ['#C48D58', '#B87F48', '#CF9A63', '#BE8650'];
+            const plankW = 256, plankH = 64;
+            for (let r = 0; r < 16; r++) {
+                const off = (r * 97) % plankW; // Susunan papan tidak beraturan
+                for (let c = -1; c <= 4; c++) {
+                    const px = c * plankW - off, py = r * plankH;
+                    ctx.fillStyle = tones[Math.abs(c * 7 + r * 13) % 4];
                     ctx.fillRect(px + 1.5, py + 1.5, plankW - 3, plankH - 3);
 
-                    // Organic wood grain striations
-                    ctx.strokeStyle = `rgba(130, 105, 80, 0.20)`;
+                    ctx.strokeStyle = 'rgba(90, 55, 25, 0.22)'; // Serat kayu
                     ctx.lineWidth = 1;
-                    for (let g = 0; g < 5; g++) {
-                        const gy = py + (g + 1) * (plankH / 6) + ((c + g) % 3) * 1.5;
+                    for (let g = 0; g < 3; g++) {
+                        const gy = py + (g + 1) * (plankH / 4);
                         ctx.beginPath();
-                        ctx.moveTo(px + 4, gy);
-                        ctx.lineTo(px + plankW - 4, gy);
+                        ctx.moveTo(px + 6, gy);
+                        ctx.lineTo(px + plankW - 6, gy);
                         ctx.stroke();
                     }
-
-                    // Crisp top/left sunlight highlight bevel
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.60)';
+                    ctx.strokeStyle = 'rgba(255, 235, 200, 0.18)'; // Highlight tepi atas
                     ctx.beginPath();
-                    ctx.moveTo(px + 1.5, py + plankH - 3);
-                    ctx.lineTo(px + 1.5, py + 1.5);
-                    ctx.lineTo(px + plankW - 3, py + 1.5);
-                    ctx.stroke();
-
-                    // Dark bottom/right shadow groove for tactile plank depth
-                    ctx.strokeStyle = 'rgba(90, 75, 55, 0.45)';
-                    ctx.beginPath();
-                    ctx.moveTo(px + 2, py + plankH - 1.5);
-                    ctx.lineTo(px + plankW - 1.5, py + plankH - 1.5);
-                    ctx.lineTo(px + plankW - 1.5, py + 2);
+                    ctx.moveTo(px + 2, py + 2);
+                    ctx.lineTo(px + plankW - 2, py + 2);
                     ctx.stroke();
                 }
             }
         } else {
-            // Dark Modern Architectural Slate Tiles
-            ctx.fillStyle = '#111827';
+            // Dark Modern Architectural Slate Tiles (#2B3140 base: RGB 43, 49, 64 - avoids pitch black)
+            ctx.fillStyle = '#212632';
             ctx.fillRect(0, 0, 1024, 1024);
 
             const tileSize = 256;
             for (let x = 0; x < 1024; x += tileSize) {
                 for (let y = 0; y < 1024; y += tileSize) {
                     const toneVar = ((x * 13 + y * 29) % 5) - 2;
-                    const baseTone = 26 + toneVar * 2;
-                    ctx.fillStyle = `rgb(${baseTone}, ${baseTone + 2}, ${baseTone + 5})`;
+                    const rVal = 43 + toneVar;
+                    const gVal = 49 + toneVar;
+                    const bVal = 64 + toneVar;
+                    ctx.fillStyle = `rgb(${rVal}, ${gVal}, ${bVal})`;
                     ctx.fillRect(x + 2, y + 2, tileSize - 4, tileSize - 4);
 
                     // Subtle surface mineral speckles
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-                    for (let s = 0; s < 12; s++) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+                    for (let s = 0; s < 8; s++) {
                         const sx = x + (s * 37) % tileSize;
                         const sy = y + (s * 43) % tileSize;
                         ctx.fillRect(sx, sy, 2, 2);
                     }
 
                     // Grout border line
-                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+                    ctx.strokeStyle = 'rgba(20, 24, 35, 0.45)';
                     ctx.lineWidth = 2;
                     ctx.strokeRect(x, y, tileSize, tileSize);
                 }
@@ -477,29 +539,43 @@ class Office3D {
         return texture;
     }
 
-    /**
-     * Generates modern architectural floor typography decals (e.g. LEADERSHIP, MARKETING & BUSINESS)
-     */
-    generateFloorDecalTexture(text) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1024;
-        canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, 1024, 256);
+        generateWindowViewTexture() {
+        const c = document.createElement('canvas');
+        c.width = 512; c.height = 300;
+        const g = c.getContext('2d');
 
-        // Modern wide-tracking architectural sans-serif typography
-        ctx.font = '900 64px "Inter", "Segoe UI", Roboto, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.letterSpacing = '14px';
+        const sky = g.createLinearGradient(0, 0, 0, 300);
+        sky.addColorStop(0, '#8EC5E6');
+        sky.addColorStop(0.65, '#CFE8F5');
+        sky.addColorStop(1, '#E8F4FA');
+        g.fillStyle = sky;
+        g.fillRect(0, 0, 512, 300);
 
-        // Subtle dark charcoal tone matching the reference image floor print
-        ctx.fillStyle = this.currentTheme === 'light' ? 'rgba(55, 50, 45, 0.65)' : 'rgba(56, 189, 248, 0.75)';
-        ctx.fillText(text, 512, 128);
+        g.fillStyle = 'rgba(255,255,255,0.85)';          // awan
+        [[90, 70, 46], [140, 62, 36], [360, 100, 40], [410, 92, 30]].forEach(([x, y, r]) => {
+            g.beginPath(); g.ellipse(x, y, r * 1.5, r * 0.5, 0, 0, Math.PI * 2); g.fill();
+        });
 
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        return texture;
+        g.fillStyle = '#8CC26B';                          // bukit belakang
+        g.beginPath(); g.moveTo(0, 230);
+        g.quadraticCurveTo(130, 190, 260, 225);
+        g.quadraticCurveTo(390, 255, 512, 210);
+        g.lineTo(512, 300); g.lineTo(0, 300); g.fill();
+
+        g.fillStyle = '#5FA24A';                          // bukit depan
+        g.beginPath(); g.moveTo(0, 262);
+        g.quadraticCurveTo(160, 235, 300, 265);
+        g.quadraticCurveTo(420, 285, 512, 255);
+        g.lineTo(512, 300); g.lineTo(0, 300); g.fill();
+
+        [[70, 238, 22], [430, 236, 26], [250, 248, 16]].forEach(([x, y, r]) => {   // pohon
+            g.fillStyle = '#6B4A2B'; g.fillRect(x - 3, y - 4, 6, 14);
+            g.fillStyle = '#3F8F3C'; g.beginPath(); g.arc(x, y - r, r, 0, Math.PI * 2); g.fill();
+        });
+
+        const t = new THREE.CanvasTexture(c);
+        t.minFilter = THREE.LinearFilter;
+        return t;
     }
 
     /**
@@ -511,11 +587,11 @@ class Office3D {
         canvas.height = 340;
         const ctx = canvas.getContext('2d');
 
-        // Whiteboard surface with subtle clean grid
-        ctx.fillStyle = '#ffffff';
+        // Whiteboard surface (#EEF1F4 - avoids harsh #FFFFFF clipping)
+        ctx.fillStyle = '#eef1f4';
         ctx.fillRect(0, 0, 512, 340);
 
-        ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+        ctx.strokeStyle = 'rgba(140, 152, 168, 0.25)';
         ctx.lineWidth = 1;
         for (let x = 20; x < 512; x += 30) {
             ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 340); ctx.stroke();
@@ -580,6 +656,8 @@ class Office3D {
         }
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
         return texture;
     }
@@ -593,11 +671,11 @@ class Office3D {
         canvas.height = 500;
         const ctx = canvas.getContext('2d');
 
-        // Pure white minimalist paper
-        ctx.fillStyle = '#ffffff';
+        // Clean paper tone (#EEF1F4 - avoids pure white glare)
+        ctx.fillStyle = '#eef1f4';
         ctx.fillRect(0, 0, 380, 500);
 
-        ctx.strokeStyle = '#e2e8f0';
+        ctx.strokeStyle = '#c9ddee';
         ctx.lineWidth = 4;
         ctx.strokeRect(16, 16, 348, 468);
 
@@ -619,6 +697,8 @@ class Office3D {
         ctx.fillText('VIRTUAL OFFICE HQ • STUDIO', 42, 420);
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
         return texture;
     }
@@ -688,6 +768,8 @@ class Office3D {
         }
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
         return texture;
     }
@@ -767,6 +849,8 @@ class Office3D {
         ctx.fillText('> [SUCCESS] SSE connection pool active: 4 agents online', 28, 295);
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
         return texture;
     }
@@ -822,6 +906,8 @@ class Office3D {
         });
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
         return texture;
     }
@@ -830,24 +916,45 @@ class Office3D {
     // LIGHTING SETUP (PBR PHYSICAL LIGHTS)
     // ==========================================
 
+    applyLightingPreset() {
+        const L = this.currentTheme === 'light';
+        if (this.renderer) this.renderer.toneMappingExposure = 1.0;
+
+        if (this.hemiLight) {
+            this.hemiLight.color.setHex(L ? 0xBFE0F2 : 0x38bdf8);
+            this.hemiLight.groundColor.setHex(L ? 0x8A7A62 : 0x1e293b);
+            this.hemiLight.intensity = L ? 0.45 : 0.48;
+        }
+
+        if (this.ambientLight) {
+            this.ambientLight.color.setHex(L ? 0xFFF3DC : 0xc9ddee);
+            this.ambientLight.intensity = L ? 0.10 : 0.40;
+        }
+
+        if (this.dirLight) {
+            this.dirLight.color.setHex(L ? 0xFFF1D6 : 0xffffff);
+            this.dirLight.intensity = L ? 0.95 : 0.85;
+        }
+
+        if (this.fillLight) this.fillLight.intensity = L ? 0.22 : 0.15;
+        if (this.meetingLight) this.meetingLight.intensity = L ? 0.40 : 1.0;
+        if (this.coffeeLight) this.coffeeLight.intensity  = L ? 0.45 : 1.1;
+    }
+
     setupLighting() {
         const isLight = this.currentTheme === 'light';
 
-        // 1. Hemisphere Light (Soft Warm Sky & Scandinavian Birch Floor Bounce)
-        this.hemiLight = new THREE.HemisphereLight(
-            isLight ? 0xfffdf7 : 0x38bdf8,
-            isLight ? 0xe2d7c8 : 0x090d16,
-            isLight ? 0.45 : 0.40
-        );
+        // 1. Hemisphere Light (Soft Sky & Ground Bounce)
+        this.hemiLight = new THREE.HemisphereLight(0xBFE0F2, 0x8A7A62, 0.45);
         this.scene.add(this.hemiLight);
 
-        // 2. Ambient Light (Soft Daylight Fill)
-        this.ambientLight = new THREE.AmbientLight(isLight ? 0xfffdfa : 0xdbeafe, isLight ? 0.50 : 0.55);
+        // 2. Ambient Light (Subtle warm fill)
+        this.ambientLight = new THREE.AmbientLight(0xFFF3DC, 0.10);
         this.scene.add(this.ambientLight);
 
-        // 3. Main Directional Light (Warm Scandinavian Sunlight casting delicate contact shadows)
-        this.dirLight = new THREE.DirectionalLight(isLight ? 0xfffaf2 : 0xffffff, isLight ? 1.45 : 0.95);
-        this.dirLight.position.set(22, 36, 24);
+        // 3. Key Directional Light (Kiri-Atas: -14, 30, 20 menciptakan 3 nilai sisi pada setiap kubus)
+        this.dirLight = new THREE.DirectionalLight(0xFFF1D6, 0.95);
+        this.dirLight.position.set(-14, 30, 20);
         this.dirLight.castShadow = true;
         this.dirLight.shadow.mapSize.width = 2048;
         this.dirLight.shadow.mapSize.height = 2048;
@@ -859,33 +966,122 @@ class Office3D {
         this.dirLight.shadow.camera.top = d;
         this.dirLight.shadow.camera.bottom = -d;
         this.dirLight.shadow.bias = -0.0001;
-        this.dirLight.shadow.normalBias = 0.03;
-        this.dirLight.shadow.radius = isLight ? 1.8 : 2.5;
+        this.dirLight.shadow.normalBias = 0.02;
+        this.dirLight.shadow.radius = 2.2;
         this.scene.add(this.dirLight);
 
-        // 4. Meeting Room Cool Light
-        this.meetingLight = new THREE.PointLight(isLight ? 0x3b82f6 : 0x60a5fa, isLight ? 1.1 : 1.3, 12);
+        // 4. Fill Directional Light (Kanan-Depan: 18, 8, 6 tanpa shadow)
+        this.fillLight = new THREE.DirectionalLight(0xcfe6f5, 0.22);
+        this.fillLight.position.set(18, 8, 6);
+        this.scene.add(this.fillLight);
+
+        // 5. Meeting Room Light
+        this.meetingLight = new THREE.PointLight(0x6a82a6, 0.40, 12);
         this.meetingLight.position.set(-7.5, 4.2, -8.75);
         this.scene.add(this.meetingLight);
 
-        // 5. Lounge Warm Chandelier Light (Casts warm glow over the coffee table & sofas)
-        this.coffeeLight = new THREE.PointLight(0xf59e0b, isLight ? 1.2 : 1.5, 12);
+        // 6. Lounge Warm Chandelier Light
+        this.coffeeLight = new THREE.PointLight(PALETTE.accent.amber, 0.45, 12);
         this.coffeeLight.position.set(3.8, 3.5, 7.2);
         this.scene.add(this.coffeeLight);
 
-        // 6. Selection Spotlight
-        this.selectionLight = new THREE.PointLight(isLight ? 0x2563eb : 0x38bdf8, 0, 9);
+        // 7. Selection Spotlight
+        this.selectionLight = new THREE.PointLight(PALETTE.accent.teal, 0, 9);
         this.selectionLight.position.set(0, 4, 0);
         this.scene.add(this.selectionLight);
+
+        // Apply theme lighting calibration
+        this.applyLightingPreset();
     }
 
     // ==========================================
     // OFFICE ENVIRONMENT & ARCHITECTURE
     // ==========================================
 
+    /**
+     * Builds surrounding ground, grass, walkway, and decorative low-poly trees (T5, T10)
+     */
+    buildGround() {
+        const isLight = this.currentTheme === 'light';
+        this.grassMat = new THREE.MeshStandardMaterial({
+            color: isLight ? PALETTE.grass : PALETTE.grassDark,
+            roughness: 1.0
+        });
+        const grass = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), this.grassMat);
+        grass.rotation.x = -Math.PI / 2;
+        grass.position.y = -0.55;
+        grass.receiveShadow = true;
+        this.officeGroup.add(grass);
+
+        const walk = new THREE.Mesh(
+            new THREE.BoxGeometry(28, 0.14, 28),
+            new THREE.MeshStandardMaterial({ color: PALETTE.walkway, roughness: 0.9 })
+        );
+        walk.position.y = -0.48;
+        walk.receiveShadow = true;
+        this.officeGroup.add(walk);
+
+        // Optional T10: Low-poly trees around the walkway perimeter
+        this.buildSurroundingTrees();
+    }
+
+    buildSurroundingTrees() {
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.8 });
+        const foliageMat = new THREE.MeshStandardMaterial({
+            color: 0x5b9b3e,
+            roughness: 0.7,
+            flatShading: true
+        });
+
+        const treePositions = [
+            [-18, -18], [0, -19], [18, -18],
+            [-19, 0], [19, 0],
+            [-18, 18], [0, 19], [18, 18],
+            [-22, 10], [22, 10], [-22, -10], [22, -10]
+        ];
+
+        treePositions.forEach(([tx, tz]) => {
+            const treeGroup = new THREE.Group();
+            treeGroup.position.set(tx, -0.55, tz);
+
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.2, 0.3, 1.8, 6),
+                trunkMat
+            );
+            trunk.position.y = 0.9;
+            trunk.castShadow = true;
+            treeGroup.add(trunk);
+
+            const canopy = new THREE.Mesh(
+                new THREE.IcosahedronGeometry(1.4, 0),
+                foliageMat
+            );
+            canopy.position.y = 2.4;
+            canopy.castShadow = true;
+            treeGroup.add(canopy);
+
+            this.officeGroup.add(treeGroup);
+        });
+    }
+
+    /**
+     * Tames excessive metalness on meshes without envMap to avoid dark black holes (T7)
+     */
+    tameMetalness(root, max = 0.15) {
+        if (!root) return;
+        root.traverse(o => {
+            if (o.isMesh && o.material && o.material.metalness > max) {
+                o.material.metalness = max;
+            }
+        });
+    }
+
     buildOfficeEnvironment() {
         this.officeGroup = new THREE.Group();
         this.scene.add(this.officeGroup);
+
+        // 0. Surrounding Ground, Grass & Walkway (T5)
+        this.buildGround();
 
         const isLight = this.currentTheme === 'light';
         const roomWidth = 24;
@@ -903,20 +1099,17 @@ class Office3D {
         floor.receiveShadow = true;
         this.officeGroup.add(floor);
 
-        // Architectural Floor Typography Decals (Directly on Walkway floor like Reference Image)
-        this.buildFloorDecals();
-
         // Overhead White Architectural Beams & Forest Green Pendant Dome Lamps
-        this.buildOverheadBeamsAndPendants();
+        this.buildOverheadBeams();
 
         // Center Low Planter Credenza Divider (Dividing bottom workstation zones)
         this.buildCenterPlanterCredenza();
 
-        // 2. Cutaway Architectural Walls - Symmetrical High-Contrast Slate
+        // 2. Cutaway Architectural Walls - Symmetrical Soft Modern Slate (#98A9C2 / #3C4760)
         this.wallMat = new THREE.MeshStandardMaterial({
-            color: isLight ? 0x334155 : 0x0f172a,
-            roughness: 0.82,
-            metalness: 0.04
+            color: isLight ? PALETTE.wall : PALETTE.wallDark,
+            roughness: 0.85,
+            metalness: 0.02
         });
 
         const wallHeight = 4.5;
@@ -936,8 +1129,12 @@ class Office3D {
         leftWall.receiveShadow = true;
         this.officeGroup.add(leftWall);
 
-        // Baseboards - Crisp dark framing outline for maximum architectural definition
-        this.baseboardMat = new THREE.MeshStandardMaterial({ color: isLight ? 0x0f172a : 0x38bdf8, roughness: 0.35 });
+        // Baseboards & Crown Molding - Harmonized trim (#6A82A6 / #4F5D7E)
+        this.baseboardMat = new THREE.MeshStandardMaterial({
+            color: isLight ? PALETTE.trim : PALETTE.trimDark,
+            roughness: 0.45,
+            metalness: 0.05
+        });
         const bb1 = new THREE.Mesh(new THREE.BoxGeometry(roomWidth, 0.15, 0.05), this.baseboardMat);
         bb1.position.set(0, 0.08, -roomDepth / 2 + wallThickness / 2 + 0.03);
         this.officeGroup.add(bb1);
@@ -955,55 +1152,20 @@ class Office3D {
         crown2.position.set(-roomWidth / 2 + wallThickness / 2 + 0.04, wallHeight - 0.05, 0);
         this.officeGroup.add(crown2);
 
-        // Realistic Office Windows - Back Wall
-        this.winFrameMat = new THREE.MeshStandardMaterial({ color: isLight ? 0xffffff : 0x1e293b, roughness: 0.25 });
-        for (let i = -1; i <= 1; i++) {
-            const winFrame = new THREE.Mesh(
-                new THREE.BoxGeometry(4.2, 2.3, 0.1),
-                this.winFrameMat
-            );
-            winFrame.position.set(i * 6, 2.5, -roomDepth / 2 + 0.22);
-            this.officeGroup.add(winFrame);
-
-            const glassPane = new THREE.Mesh(
-                new THREE.PlaneGeometry(3.9, 2.0),
-                new THREE.MeshPhysicalMaterial({
-                    color: isLight ? 0xbfdbfe : 0x1e3a5f,
-                    transparent: true,
-                    opacity: 0.85,
-                    roughness: 0.1,
-                    transmission: 0.6
-                })
-            );
-            glassPane.position.set(i * 6, 2.5, -roomDepth / 2 + 0.28);
-            this.officeGroup.add(glassPane);
-        }
-
-        // Realistic Office Windows - Left Wall (Symmetrical Architectural Balance)
-        const leftWinPositions = [0, 6];
-        leftWinPositions.forEach(zPos => {
-            const winFrameL = new THREE.Mesh(
-                new THREE.BoxGeometry(0.1, 2.3, 4.2),
-                this.winFrameMat
-            );
-            winFrameL.position.set(-roomWidth / 2 + 0.22, 2.5, zPos);
-            this.officeGroup.add(winFrameL);
-
-            const glassPaneL = new THREE.Mesh(
-                new THREE.PlaneGeometry(4.2, 2.0),
-                new THREE.MeshPhysicalMaterial({
-                    color: isLight ? 0xbfdbfe : 0x1e3a5f,
-                    transparent: true,
-                    opacity: 0.85,
-                    roughness: 0.1,
-                    transmission: 0.6
-                })
-            );
-            glassPaneL.rotation.y = Math.PI / 2;
-            glassPaneL.position.set(-roomWidth / 2 + 0.28, 2.5, zPos);
-            this.officeGroup.add(glassPaneL);
+                // Jendela dinding belakang (digeser agar tidak tertimpa TV ruang rapat dan rack server)
+        [-1.5, 3.5].forEach(wx => {
+            const w = this.buildWindow3D(4.2, 2.3);
+            w.position.set(wx, 2.5, -roomDepth / 2 + wallThickness / 2);
+            this.officeGroup.add(w);
         });
 
+        // Jendela dinding kiri
+        [0, 6].forEach(wz => {
+            const w = this.buildWindow3D(4.2, 2.3);
+            w.rotation.y = Math.PI / 2;
+            w.position.set(-roomWidth / 2 + wallThickness / 2, 2.5, wz);
+            this.officeGroup.add(w);
+        });
         // 3. Meeting Room & Server Hub (Harmoniously aligned in back quadrants)
         this.buildMeetingRoom(-7.5, -8.75);
         this.buildServerRacks(7.5, -10.5);
@@ -1014,14 +1176,21 @@ class Office3D {
         // 5. Lounge Decor, Pendant Chandelier & Furniture
         this.buildLoungeDecor();
 
+        // Zone Carpets (T6: lounge teal-blue, meeting brick-red)
+        this.carpetLounge = this.createCarpet(3.8, 7.2, 6.4, 4.4, PALETTE.rugLounge, 1.0);
+        this.carpetMeeting = this.createCarpet(-7.5, -8.75, 7.2, 4.8, PALETTE.rugMeeting, 1.0);
+
         // 6. Lush Potted Plants
         this.createPottedPlant(-10.5, 4.5);
         this.createPottedPlant(10.5, -3.5);
         this.createPottedPlant(-1.5, -9.5);
         this.createPottedPlant(-1.5, 6.5);
 
-        // 7. Cute Shiba Inu Dog Mascot (Like in Reference Image)
-        this.buildShibaInuMascot();
+        // 7. Cute Office Cat Mascot (Dynamically roams around the office)
+        this.buildCatMascot();
+
+        // T7: Tame metalness across all office environment meshes
+        this.tameMetalness(this.officeGroup);
     }
 
     createCarpet(x, z, width, depth, colorHex, opacity = 0.4) {
@@ -1041,101 +1210,149 @@ class Office3D {
         return carpet;
     }
 
-    buildFloorDecals() {
+        buildOverheadBeams() {
         const isLight = this.currentTheme === 'light';
-
-        // Leadership Zone Decal (Left Walkway Section)
-        const decalMatL = new THREE.MeshBasicMaterial({
-            map: this.cachedTextures.decalLeadership,
-            transparent: true,
-            opacity: isLight ? 0.82 : 0.9,
-            depthWrite: false
-        });
-        const decalL = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 1.62), decalMatL);
-        decalL.rotation.x = -Math.PI / 2;
-        decalL.position.set(-4.5, 0.015, -0.6);
-        this.officeGroup.add(decalL);
-
-        // Marketing & Business Zone Decal (Right Walkway Section)
-        const decalMatR = new THREE.MeshBasicMaterial({
-            map: this.cachedTextures.decalMarketing,
-            transparent: true,
-            opacity: isLight ? 0.82 : 0.9,
-            depthWrite: false
-        });
-        const decalR = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.87), decalMatR);
-        decalR.rotation.x = -Math.PI / 2;
-        decalR.position.set(4.5, 0.015, -0.6);
-        this.officeGroup.add(decalR);
-    }
-
-    buildOverheadBeamsAndPendants() {
-        const isLight = this.currentTheme === 'light';
-
-        // 1. Sleek Structural Horizontal Beams (spanning X = -12 to +12 at Y = 4.1)
         const beamMat = new THREE.MeshStandardMaterial({
-            color: isLight ? 0xffffff : 0x1e293b,
-            roughness: 0.3,
-            metalness: 0.1
+            color: isLight ? PALETTE.trim : 0x334155,
+            roughness: 0.5
         });
-        const beamPositionsZ = [-3.8, 3.8];
-
-        beamPositionsZ.forEach(bz => {
+        [-3.8, 3.8].forEach(bz => {
             const beam = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.24, 0.24), beamMat);
             beam.position.set(0, 4.1, bz);
-            beam.castShadow = true;
+            beam.castShadow = false; // hindari garis bayangan di lantai
             this.officeGroup.add(beam);
+        });
+    }
 
-            // Subtle linear LED strip under beam
-            const ledStrip = new THREE.Mesh(
-                new THREE.BoxGeometry(24.0, 0.02, 0.06),
-                new THREE.MeshBasicMaterial({ color: isLight ? 0xfffbeb : 0x38bdf8 })
-            );
-            ledStrip.position.set(0, 3.97, bz);
-            this.officeGroup.add(ledStrip);
+    buildWindow3D(W = 4.2, H = 2.3) {
+        const isLight = this.currentTheme === 'light';
+        const g = new THREE.Group();
+
+        if (!this.winFrameMat)  this.winFrameMat  = new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.frame : 0x475569, roughness: 0.45 });
+        if (!this.winCasingMat) this.winCasingMat = new THREE.MeshStandardMaterial({ color: isLight ? 0xF1EADC : 0x5B6478, roughness: 0.6 });
+        if (!this.winJambMat)   this.winJambMat   = new THREE.MeshStandardMaterial({ color: isLight ? 0xCBBFA6 : 0x3C4760, roughness: 0.8 });
+        if (!this.winViewMats)  this.winViewMats  = [];
+
+        const box = (w, h, d, x, y, z, mat) => {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+            m.position.set(x, y, z);
+            m.castShadow = true;
+            m.receiveShadow = true;
+            g.add(m);
+            return m;
+        };
+
+        // 1. Casing (trim luar, menonjol dari dinding)
+        const t = 0.14;
+        box(W + 2 * t, t, 0.07, 0,  H / 2 + t / 2, 0.035, this.winCasingMat);
+        box(W + 2 * t, t, 0.07, 0, -H / 2 - t / 2, 0.035, this.winCasingMat);
+        box(t, H, 0.07, -(W / 2 + t / 2), 0, 0.035, this.winCasingMat);
+        box(t, H, 0.07,  (W / 2 + t / 2), 0, 0.035, this.winCasingMat);
+
+        // 2. Sill (ambang jendela di bawah)
+        box(W + 0.6, 0.06, 0.32, 0, -H / 2 - t - 0.03, 0.16, this.winCasingMat);
+
+        // 3. Jamb (sisi dalam bukaan, memberi kesan kedalaman)
+        box(W, 0.05, 0.10, 0,  H / 2 - 0.025, 0.05, this.winJambMat);
+        box(W, 0.05, 0.10, 0, -H / 2 + 0.025, 0.05, this.winJambMat);
+        box(0.05, H, 0.10, -W / 2 + 0.025, 0, 0.05, this.winJambMat);
+        box(0.05, H, 0.10,  W / 2 - 0.025, 0, 0.05, this.winJambMat);
+
+        // 4. Pemandangan luar (di dasar bukaan)
+        const viewMat = new THREE.MeshBasicMaterial({
+            map: this.cachedTextures.windowView,
+            color: isLight ? 0xFFFFFF : 0x5A6A85
+        });
+        this.winViewMats.push(viewMat);
+        const view = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.05, H - 0.05), viewMat);
+        view.position.z = 0.008;
+        g.add(view);
+
+        // 5. Sash frame + mullion (rangka kaca)
+        const sw = W - 0.1, sh = H - 0.1, bar = 0.06;
+        box(sw, bar, 0.05, 0,  sh / 2 - bar / 2, 0.10, this.winFrameMat);
+        box(sw, bar, 0.05, 0, -sh / 2 + bar / 2, 0.10, this.winFrameMat);
+        box(bar, sh, 0.05, -sw / 2 + bar / 2, 0, 0.10, this.winFrameMat);
+        box(bar, sh, 0.05,  sw / 2 - bar / 2, 0, 0.10, this.winFrameMat);
+        box(0.05, sh, 0.045, 0, 0, 0.10, this.winFrameMat);          // mullion vertikal
+        box(sw, 0.045, 0.045, 0, 0.12, 0.10, this.winFrameMat);      // mullion horizontal
+
+        // 6. Kaca tipis + pantulan diagonal
+        const glass = new THREE.Mesh(
+            new THREE.PlaneGeometry(sw, sh),
+            new THREE.MeshStandardMaterial({
+                color: 0xBFE0F2, transparent: true, opacity: 0.14,
+                roughness: 0.05, metalness: 0, depthWrite: false
+            })
+        );
+        glass.position.z = 0.085;
+        g.add(glass);
+
+        const glareMat = new THREE.MeshBasicMaterial({
+            color: 0xFFFFFF, transparent: true, opacity: 0.12, depthWrite: false
+        });
+        [[-1.5, -1.1, 0.0, -0.4], [-0.8, -0.65, 0.45, 0.3]].forEach(([a, b, c, d]) => {
+            const s = new THREE.Shape();
+            s.moveTo(a, -1.0); s.lineTo(b, -1.0); s.lineTo(c, 1.0); s.lineTo(d, 1.0); s.closePath();
+            const glare = new THREE.Mesh(new THREE.ShapeGeometry(s), glareMat);
+            glare.position.z = 0.087;
+            g.add(glare);
         });
 
-        // 2. Iconic Forest Green Pendant Dome Lamps directly over workstation desks
-        const lampX = [-4.5, -1.5, 1.5, 4.5];
-        const lampZ = [-2.5, 2.5];
+        return g;
+    }
 
-        const domeMat = new THREE.MeshStandardMaterial({
-            color: isLight ? 0x365744 : 0x10b981,
-            roughness: 0.45,
-            metalness: 0.2
+    buildWallTV(w = 3.6, h = 1.8) {
+        const isLight = this.currentTheme === 'light';
+        const g = new THREE.Group();
+
+        const bodyMat  = new THREE.MeshStandardMaterial({ color: 0x23272E, roughness: 0.35, metalness: 0.1 });
+        const backMat  = new THREE.MeshStandardMaterial({ color: 0x2F3640, roughness: 0.5 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x5C6B80, roughness: 0.4, metalness: 0.15 });
+
+        const add = (geo, mat, x, y, z) => {
+            const m = new THREE.Mesh(geo, mat);
+            m.position.set(x, y, z);
+            m.castShadow = true;
+            g.add(m);
+            return m;
+        };
+
+        // Bodi + bezel
+        add(new THREE.BoxGeometry(w + 0.1, h + 0.1, 0.08), bodyMat, 0, 0, 0);
+        // Panel belakang (kesan ketebalan)
+        add(new THREE.BoxGeometry(w * 0.6, h * 0.5, 0.05), backMat, 0, 0, -0.065);
+        // Lengan mount + plat dinding
+        add(new THREE.BoxGeometry(0.16, 0.14, 0.12), metalMat, 0, 0, -0.125);
+        add(new THREE.BoxGeometry(0.46, 0.30, 0.02), bodyMat, 0, 0, -0.19);
+
+        // Layar
+        const tex = this.cachedTextures.presentationScreen;
+        const screenMat = new THREE.MeshStandardMaterial({
+            map: tex, emissiveMap: tex, emissive: 0xFFFFFF,
+            emissiveIntensity: isLight ? 0.55 : 0.8, roughness: 0.15
         });
-        const cordMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e });
-        const brassMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.8, roughness: 0.2 });
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), screenMat);
+        screen.position.z = 0.042;
+        g.add(screen);
 
-        lampX.forEach(lx => {
-            lampZ.forEach(lz => {
-                const lampGroup = new THREE.Group();
-                lampGroup.position.set(lx, 0, lz);
+        // Pantulan diagonal di layar
+        const glareMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.07, depthWrite: false });
+        const s = new THREE.Shape();
+        s.moveTo(-1.3, -0.9); s.lineTo(-0.7, -0.9); s.lineTo(0.3, 0.9); s.lineTo(-0.3, 0.9); s.closePath();
+        const glare = new THREE.Mesh(new THREE.ShapeGeometry(s), glareMat);
+        glare.position.z = 0.0435;
+        g.add(glare);
 
-                // Thin black cord hanging from ceiling / beam (Y: 4.1 down to 2.5)
-                const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1.6, 8), cordMat);
-                cord.position.y = 3.3;
-                lampGroup.add(cord);
+        // LED status di bezel bawah
+        const led = new THREE.Mesh(
+            new THREE.BoxGeometry(0.05, 0.012, 0.006),
+            new THREE.MeshBasicMaterial({ color: PALETTE.accent.teal })
+        );
+        led.position.set(w / 2 - 0.12, -(h / 2 + 0.025), 0.042);
+        g.add(led);
 
-                // Brass fitting ring
-                const fitting = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.08, 16), brassMat);
-                fitting.position.y = 2.52;
-                lampGroup.add(fitting);
-
-                // Forest Green Dome Shade
-                const dome = new THREE.Mesh(new THREE.SphereGeometry(0.38, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
-                dome.position.y = 2.45;
-                dome.castShadow = true;
-                lampGroup.add(dome);
-
-                // Subtle warm downlight pool on the desk
-                const downlight = new THREE.PointLight(0xfff7ed, isLight ? 0.45 : 0.8, 5.0, 1.5);
-                downlight.position.y = 2.35;
-                lampGroup.add(downlight);
-
-                this.officeGroup.add(lampGroup);
-            });
-        });
+        return g;
     }
 
     buildCenterPlanterCredenza() {
@@ -1143,9 +1360,9 @@ class Office3D {
         const planterGroup = new THREE.Group();
         planterGroup.position.set(0, 0, 3.0);
 
-        // Low Blonde Scandinavian Wood Credenza
+        // Low Blonde Scandinavian Wood Credenza (T5: PALETTE.wood = 0xc7b8a0)
         const boxMat = new THREE.MeshStandardMaterial({
-            color: isLight ? 0xe2d6c3 : 0x334155,
+            color: isLight ? PALETTE.wood : 0x334155,
             roughness: 0.4
         });
         const planterBox = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.72, 3.8), boxMat);
@@ -1154,8 +1371,8 @@ class Office3D {
         planterBox.receiveShadow = true;
         planterGroup.add(planterBox);
 
-        // 3 Potted Succulents & Bonsai along the top
-        const potMat = new THREE.MeshStandardMaterial({ color: isLight ? 0xffffff : 0x475569, roughness: 0.3 });
+        // 3 Potted Succulents & Bonsai along the top (T8: PALETTE.pot = 0xe6ded0, plant = 0x5fa777)
+        const potMat = new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.pot : 0x475569, roughness: 0.35 });
         const plantZ = [-1.2, 0, 1.2];
         plantZ.forEach((pz, i) => {
             const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.22, 16), potMat);
@@ -1173,8 +1390,8 @@ class Office3D {
 
             // Plant greenery
             const plantMat = new THREE.MeshStandardMaterial({
-                color: i === 1 ? 0x15803d : 0x16a34a,
-                roughness: 0.6
+                color: PALETTE.plant, // 0x5fa777
+                roughness: 0.55
             });
             const leaves = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 1), plantMat);
             leaves.position.set(0, 1.10, pz);
@@ -1186,76 +1403,289 @@ class Office3D {
         this.officeGroup.add(planterGroup);
     }
 
-    buildShibaInuMascot() {
-        const shibaGroup = new THREE.Group();
-        shibaGroup.name = 'OfficeMascotShiba';
-        shibaGroup.position.set(3.2, 0, 1.8);
-        shibaGroup.rotation.y = -Math.PI / 4;
+        buildCatMascot() {
+        const catGroup = new THREE.Group();
+        catGroup.name = 'OfficeMascotCat';
+        catGroup.position.set(3.2, 0, 1.8);
+        catGroup.rotation.y = -Math.PI / 4;
 
-        const coatMat = new THREE.MeshStandardMaterial({ color: 0xe0a96d, roughness: 0.7 });
-        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xfffcf7, roughness: 0.7 });
-        const noseMat = new THREE.MeshBasicMaterial({ color: 0x1e1e1e });
+        const coatMat   = new THREE.MeshStandardMaterial({ color: 0xdf843c, roughness: 0.65 }); // Ginger tabby
+        const whiteMat  = new THREE.MeshStandardMaterial({ color: 0xfffcf7, roughness: 0.6 });
+        const pinkMat   = new THREE.MeshStandardMaterial({ color: 0xf59eb0, roughness: 0.4 });
+        const pupilMat  = new THREE.MeshBasicMaterial({ color: 0x111827 });
+        const eyeMat    = new THREE.MeshBasicMaterial({ color: 0x3fa796 }); // Emerald green eyes
+        const shineMat  = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const collarMat = new THREE.MeshStandardMaterial({ color: 0xe05638, roughness: 0.4 });
+        const bellMat   = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8, roughness: 0.2 });
 
-        // Body (lying / resting playfully)
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 0.52), coatMat);
-        body.position.y = 0.20;
+        const bodyRoot = new THREE.Group();
+        bodyRoot.name = 'CatBodyRoot';
+        catGroup.add(bodyRoot);
+
+        // 1. Sleek Torso
+        const body = this._ellipsoid(0.18, 0.16, 0.32, coatMat);
+        body.position.y = 0.26;
         body.castShadow = true;
-        shibaGroup.add(body);
+        bodyRoot.add(body);
 
-        // White belly patch
-        const belly = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.42), whiteMat);
-        belly.position.set(0, 0.10, 0.04);
-        shibaGroup.add(belly);
+        // White chest patch
+        const chest = this._ellipsoid(0.13, 0.12, 0.20, whiteMat);
+        chest.position.set(0, 0.22, 0.10);
+        bodyRoot.add(chest);
 
-        // Head Pivot
+        // 2. Collar & Golden Bell
+        const collar = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.016, 8, 20), collarMat);
+        collar.position.set(0, 0.33, 0.21);
+        collar.rotation.x = Math.PI / 3;
+        bodyRoot.add(collar);
+
+        const bell = new THREE.Mesh(new THREE.SphereGeometry(0.026, 12, 8), bellMat);
+        bell.position.set(0, 0.24, 0.28);
+        bodyRoot.add(bell);
+
+        // 3. Head Pivot
         const headPivot = new THREE.Group();
-        headPivot.name = 'ShibaHeadPivot';
-        headPivot.position.set(0, 0.32, 0.26);
-        shibaGroup.add(headPivot);
+        headPivot.name = 'CatHeadPivot';
+        headPivot.position.set(0, 0.36, 0.24);
+        bodyRoot.add(headPivot);
 
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.24, 0.24), coatMat);
-        head.position.set(0, 0.08, 0);
+        const head = this._ellipsoid(0.17, 0.15, 0.16, coatMat, 20);
+        head.position.set(0, 0.04, 0);
         head.castShadow = true;
         headPivot.add(head);
 
-        // White muzzle
-        const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.10, 0.12), whiteMat);
-        muzzle.position.set(0, 0.04, 0.15);
-        headPivot.add(muzzle);
+        // White Muzzle / Cheeks
+        const muzzleL = this._ellipsoid(0.065, 0.05, 0.06, whiteMat, 12);
+        muzzleL.position.set(-0.045, 0.00, 0.13);
+        headPivot.add(muzzleL);
 
-        // Nose
-        const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), noseMat);
-        nose.position.set(0, 0.07, 0.21);
+        const muzzleR = muzzleL.clone();
+        muzzleR.position.x = 0.045;
+        headPivot.add(muzzleR);
+
+        // Tiny pink nose
+        const nose = this._ellipsoid(0.02, 0.016, 0.016, pinkMat, 8);
+        nose.position.set(0, 0.03, 0.16);
         headPivot.add(nose);
 
-        // Cute pointy ears
-        [-0.09, 0.09].forEach(ex => {
-            const ear = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.09, 4), coatMat);
-            ear.position.set(ex, 0.22, -0.02);
-            ear.rotation.y = Math.PI / 4;
-            headPivot.add(ear);
+        // Pointy Cat Ears (with inner pink ear)
+        [-1, 1].forEach(s => {
+            const earOuter = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.11, 4), coatMat);
+            earOuter.position.set(s * 0.10, 0.18, 0.01);
+            earOuter.rotation.y = s * (Math.PI / 4);
+            earOuter.rotation.z = -s * 0.2;
+            headPivot.add(earOuter);
+
+            const earInner = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.08, 4), pinkMat);
+            earInner.position.set(s * 0.095, 0.17, 0.02);
+            earInner.rotation.y = s * (Math.PI / 4);
+            earInner.rotation.z = -s * 0.2;
+            headPivot.add(earInner);
         });
 
-        // Curled tail
-        const tailPivot = new THREE.Group();
-        tailPivot.name = 'ShibaTailPivot';
-        tailPivot.position.set(0, 0.28, -0.25);
-        shibaGroup.add(tailPivot);
+        // Expressive Cat Eyes
+        [-1, 1].forEach(s => {
+            const eyeGroup = new THREE.Group();
+            eyeGroup.position.set(s * 0.075, 0.06, 0.125);
 
-        const tail = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.035, 8, 16, Math.PI * 1.4), coatMat);
-        tail.rotation.x = Math.PI / 2;
-        tail.position.y = 0.06;
-        tailPivot.add(tail);
+            const iris = this._ellipsoid(0.032, 0.038, 0.015, eyeMat, 12);
+            eyeGroup.add(iris);
 
-        // Paws
-        [[-0.14, 0.18], [0.14, 0.18], [-0.14, -0.16], [0.14, -0.16]].forEach(([px, pz]) => {
-            const paw = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.10, 0.14), whiteMat);
-            paw.position.set(px, 0.05, pz);
-            shibaGroup.add(paw);
+            const pupil = this._ellipsoid(0.012, 0.028, 0.018, pupilMat, 8);
+            pupil.position.z = 0.005;
+            eyeGroup.add(pupil);
+
+            const shine = this._ellipsoid(0.008, 0.008, 0.006, shineMat, 8);
+            shine.position.set(0.01, 0.012, 0.018);
+            eyeGroup.add(shine);
+
+            headPivot.add(eyeGroup);
         });
 
-        this.officeGroup.add(shibaGroup);
-        this.shibaGroup = shibaGroup;
+        // Whiskers (thin white lines on each cheek)
+        const whiskerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+        [-1, 1].forEach(s => {
+            [-0.015, 0, 0.015].forEach(dy => {
+                const w = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.14, 4), whiskerMat);
+                w.rotation.z = Math.PI / 2 + s * (dy * 8);
+                w.position.set(s * 0.12, 0.0 + dy, 0.12);
+                headPivot.add(w);
+            });
+        });
+
+        // 4. Articulated Legs (Front Left, Front Right, Back Left, Back Right)
+        const makeCatLeg = (name, x, z) => {
+            const legPivot = new THREE.Group();
+            legPivot.name = name;
+            legPivot.position.set(x, 0.24, z);
+            catGroup.add(legPivot);
+
+            const legMesh = this._capsule(0.04, 0.16, coatMat);
+            legMesh.position.y = -0.08;
+            legPivot.add(legMesh);
+
+            const paw = this._ellipsoid(0.048, 0.035, 0.06, whiteMat, 10);
+            paw.position.set(0, -0.18, 0.015);
+            legPivot.add(paw);
+
+            return legPivot;
+        };
+
+        this.catLegFL = makeCatLeg('CatLegFL', -0.11,  0.15);
+        this.catLegFR = makeCatLeg('CatLegFR',  0.11,  0.15);
+        this.catLegBL = makeCatLeg('CatLegBL', -0.11, -0.16);
+        this.catLegBR = makeCatLeg('CatLegBR',  0.11, -0.16);
+
+        // 5. Long Animated Feline Tail
+        const tailRoot = new THREE.Group();
+        tailRoot.name = 'CatTailRoot';
+        tailRoot.position.set(0, 0.28, -0.26);
+        tailRoot.rotation.x = 0.4;
+        catGroup.add(tailRoot);
+
+        const tailSeg1 = this._capsule(0.032, 0.16, coatMat);
+        tailSeg1.position.set(0, 0.08, -0.04);
+        tailSeg1.rotation.x = -0.4;
+        tailRoot.add(tailSeg1);
+
+        const tailMid = new THREE.Group();
+        tailMid.name = 'CatTailMid';
+        tailMid.position.set(0, 0.16, -0.08);
+        tailRoot.add(tailMid);
+
+        const tailSeg2 = this._capsule(0.028, 0.16, coatMat);
+        tailSeg2.position.set(0, 0.08, 0.04);
+        tailSeg2.rotation.x = 0.5;
+        tailMid.add(tailSeg2);
+
+        const tailTip = new THREE.Group();
+        tailTip.name = 'CatTailTip';
+        tailTip.position.set(0, 0.16, 0.08);
+        tailMid.add(tailTip);
+
+        const tipMesh = this._capsule(0.024, 0.12, whiteMat); // White tail tip
+        tipMesh.position.set(0, 0.06, 0.02);
+        tipMesh.rotation.x = 0.3;
+        tailTip.add(tipMesh);
+
+        this.officeGroup.add(catGroup);
+        this.catGroup = catGroup;
+        this.shibaGroup = catGroup; // compatibility alias
+
+        // State Machine for Dynamic Roaming
+        this.catState = {
+            state: 'RESTING',
+            restTimer: 3.5,
+            walkPhase: 0,
+            target: new THREE.Vector3(3.2, 0, 1.8),
+            targetRot: -Math.PI / 4,
+            waypoints: [
+                new THREE.Vector3(3.2, 0, 1.8),   // near planter & lounge
+                new THREE.Vector3(3.8, 0, 6.2),   // lounge rug by coffee table
+                new THREE.Vector3(0.0, 0, 5.0),   // lounge hallway threshold
+                new THREE.Vector3(0.0, 0, 1.0),   // central walkway
+                new THREE.Vector3(-3.5, 0, 1.0),  // walkway left section
+                new THREE.Vector3(-4.5, 0, -4.5), // near meeting room entrance
+                new THREE.Vector3(-1.0, 0, -4.0), // back hallway
+                new THREE.Vector3(0.0, 0, -1.0),  // hallway middle
+                new THREE.Vector3(3.0, 0, -1.0),  // near right desk
+                new THREE.Vector3(7.5, 0, 4.5),   // near coffee bar counter
+                new THREE.Vector3(5.5, 0, 6.5)    // coffee lounge transition
+            ],
+            targetIndex: 0
+        };
+    }
+
+    buildShibaInuMascot() {
+        this.buildCatMascot();
+    }
+
+    updateCatLocomotion(delta, elapsedTime) {
+        const cat = this.catGroup;
+        const state = this.catState;
+        if (!cat || !state) return;
+
+        const head = cat.getObjectByName('CatHeadPivot');
+        const tailRoot = cat.getObjectByName('CatTailRoot');
+        const tailMid = cat.getObjectByName('CatTailMid');
+        const tailTip = cat.getObjectByName('CatTailTip');
+
+        if (state.state === 'RESTING') {
+            state.restTimer -= delta;
+
+            // Feline idle posture: relaxed tail sway
+            if (tailMid && tailTip) {
+                tailMid.rotation.y = Math.sin(elapsedTime * 2.2) * 0.28;
+                tailTip.rotation.y = Math.sin(elapsedTime * 2.2 - 0.6) * 0.35;
+            }
+
+            // Head curious look around & slight nod
+            if (head) {
+                head.rotation.y = Math.sin(elapsedTime * 0.9) * 0.30;
+                head.rotation.x = 0.04 + Math.sin(elapsedTime * 1.6) * 0.04;
+                head.rotation.z = Math.sin(elapsedTime * 0.7) * 0.08;
+            }
+
+            // Neutral resting legs
+            if (this.catLegFL) this.catLegFL.rotation.x = 0;
+            if (this.catLegFR) this.catLegFR.rotation.x = 0;
+            if (this.catLegBL) this.catLegBL.rotation.x = 0;
+            if (this.catLegBR) this.catLegBR.rotation.x = 0;
+
+            if (state.restTimer <= 0) {
+                state.targetIndex = (state.targetIndex + 1 + Math.floor(Math.random() * 2)) % state.waypoints.length;
+                state.target.copy(state.waypoints[state.targetIndex]);
+                state.state = 'WALKING';
+            }
+        } else if (state.state === 'WALKING') {
+            const curPos = cat.position;
+            const dx = state.target.x - curPos.x;
+            const dz = state.target.z - curPos.z;
+            const dist = Math.hypot(dx, dz);
+
+            if (dist > 0.15) {
+                // Smoothly steer towards destination
+                const targetAngle = Math.atan2(dx, dz);
+                let diff = targetAngle - cat.rotation.y;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                cat.rotation.y += diff * Math.min(delta * 5.0, 1.0);
+
+                // Move forward with natural feline walk speed
+                const speed = 1.35; // units/sec
+                const step = Math.min(dist, speed * delta);
+                curPos.x += (dx / dist) * step;
+                curPos.z += (dz / dist) * step;
+
+                // 4-beat trot gait animation
+                state.walkPhase += delta * 9.5;
+                const p = state.walkPhase;
+
+                if (this.catLegFL) this.catLegFL.rotation.x = Math.sin(p) * 0.42;
+                if (this.catLegFR) this.catLegFR.rotation.x = -Math.sin(p) * 0.42;
+                if (this.catLegBL) this.catLegBL.rotation.x = -Math.sin(p + 0.6) * 0.42;
+                if (this.catLegBR) this.catLegBR.rotation.x = Math.sin(p + 0.6) * 0.42;
+
+                // Subtle body sway & vertical step bob
+                curPos.y = Math.abs(Math.sin(p * 2)) * 0.025;
+
+                // Tail held upright & swaying in rhythm
+                if (tailRoot) tailRoot.rotation.x = -0.4;
+                if (tailMid) tailMid.rotation.y = Math.sin(p) * 0.32;
+                if (tailTip) tailTip.rotation.y = Math.sin(p - 0.5) * 0.38;
+
+                if (head) {
+                    head.rotation.x = Math.sin(p * 2) * 0.04;
+                    head.rotation.y = 0;
+                    head.rotation.z = Math.sin(p) * 0.05;
+                }
+            } else {
+                // Reached destination, sit and rest
+                state.state = 'RESTING';
+                state.restTimer = 4.0 + Math.random() * 5.0; // rest 4 - 9 seconds
+                curPos.y = 0;
+            }
+        }
     }
 
     buildMeetingRoom(x, z) {
@@ -1264,16 +1694,16 @@ class Office3D {
         const roomD = 5.5;
         const glassHeight = 3.2;
 
-        // Physical Architectural Glass
+        // Physical Architectural Glass (T4: PALETTE.glass = 0xc9ddee, emissive <= 0.15)
         const glassMat = new THREE.MeshPhysicalMaterial({
-            color: isLight ? 0xdbeafe : 0x93c5fd,
+            color: isLight ? PALETTE.glass : PALETTE.glassDark, // 0xc9ddee / 0x2a3e5c
             transparent: true,
-            opacity: 0.45,
-            roughness: 0.04,
-            metalness: 0.08,
-            transmission: 0.88,
-            ior: 1.52,
-            reflectivity: 0.5
+            opacity: 0.50,
+            roughness: 0.08,
+            metalness: 0.05,
+            transmission: 0.82,
+            ior: 1.5,
+            reflectivity: 0.35
         });
 
         // Front Glass Wall
@@ -1281,11 +1711,11 @@ class Office3D {
         frontGlass.position.set(x, glassHeight / 2, z + roomD / 2);
         this.officeGroup.add(frontGlass);
 
-        // Frosted Privacy Vinyl Strip across middle
+        // Frosted Privacy Vinyl Strip across middle (avoids pure white #FFFFFF)
         const frostMat = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
+            color: 0xeef1f4,
             transparent: true,
-            opacity: 0.35,
+            opacity: 0.28,
             roughness: 0.7
         });
         const frostBand = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.45, 0.09), frostMat);
@@ -1297,10 +1727,19 @@ class Office3D {
         rightGlass.position.set(x + roomW / 2, glassHeight / 2, z);
         this.officeGroup.add(rightGlass);
 
-        // Conference Table
+        // Thin architectural glass bottom frame
+        const glassFrameMat = new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.trim : PALETTE.trimDark, roughness: 0.4 });
+        const bottomRail1 = new THREE.Mesh(new THREE.BoxGeometry(roomW, 0.06, 0.1), glassFrameMat);
+        bottomRail1.position.set(x, 0.03, z + roomD / 2);
+        this.officeGroup.add(bottomRail1);
+        const bottomRail2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, roomD), glassFrameMat);
+        bottomRail2.position.set(x + roomW / 2, 0.03, z);
+        this.officeGroup.add(bottomRail2);
+
+        // Conference Table (T5: PALETTE.wood = 0xc7b8a0, base = PALETTE.dark)
         const tableTop = new THREE.Mesh(
             new THREE.CylinderGeometry(1.6, 1.6, 0.1, 32),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x94a3b8 : 0x334155, roughness: 0.35 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.wood : 0x334155, roughness: 0.35 })
         );
         tableTop.scale.set(1.6, 1, 0.9);
         tableTop.position.set(x, 1.1, z);
@@ -1310,7 +1749,7 @@ class Office3D {
 
         const tableLeg = new THREE.Mesh(
             new THREE.CylinderGeometry(0.2, 0.3, 1.1, 16),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x475569 : 0x0f172a, metalness: 0.8 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.35 })
         );
         tableLeg.position.set(x, 0.55, z);
         tableLeg.castShadow = true;
@@ -1325,26 +1764,20 @@ class Office3D {
             this.createSimpleChair(cx, cz, angle + Math.PI);
         }
 
-        // Ultra-HD Wall Presentation Screen (Displaying live architecture diagram)
-        const screenMat = new THREE.MeshStandardMaterial({
-            map: this.cachedTextures.presentationScreen,
-            emissiveMap: this.cachedTextures.presentationScreen,
-            emissive: 0x38bdf8,
-            emissiveIntensity: isLight ? 0.6 : 0.8,
-            roughness: 0.2
-        });
-        const presScreen = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.8, 0.05), screenMat);
-        presScreen.position.set(x, 2.2, z - roomD / 2 + 0.3);
-        this.officeGroup.add(presScreen);
+                // TV menempel di dinding belakang (permukaan dalam dinding z = -11.8)
+        const tv = this.buildWallTV(3.6, 1.8);
+        tv.position.set(x, 2.3, -11.8 + 0.2);
+        this.officeGroup.add(tv);
 
-        // Hanging conference lamp
-        const lamp = new THREE.Mesh(
-            new THREE.TorusGeometry(1.2, 0.04, 16, 32),
-            new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x3b82f6, emissiveIntensity: isLight ? 0.7 : 0.9 })
+        // Credenza di bawah TV
+        const tvCredenza = new THREE.Mesh(
+            new THREE.BoxGeometry(3.6, 0.55, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.55 })
         );
-        lamp.rotation.x = Math.PI / 2;
-        lamp.position.set(x, 3.4, z);
-        this.officeGroup.add(lamp);
+        tvCredenza.position.set(x, 0.275, -11.8 + 0.27);
+        tvCredenza.castShadow = true;
+        tvCredenza.receiveShadow = true;
+        this.officeGroup.add(tvCredenza);
     }
 
     buildCoffeeCornerInfrastructure(x, z) {
@@ -1360,19 +1793,19 @@ class Office3D {
         counter.receiveShadow = true;
         this.officeGroup.add(counter);
 
-        // Sleek Marble Countertop
+        // Sleek Marble Countertop (T8: 0xE6E4DF)
         const top = new THREE.Mesh(
             new THREE.BoxGeometry(3.0, 0.08, 0.95),
-            new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.15 })
+            new THREE.MeshStandardMaterial({ color: 0xE6E4DF, roughness: 0.25 })
         );
         top.position.set(x, 1.19, z);
         top.castShadow = true;
         this.officeGroup.add(top);
 
-        // Espresso Machine
+        // Espresso Machine (T8: PALETTE.dark = 0x2a2d33, metalness 0.15)
         const espresso = new THREE.Mesh(
             new THREE.BoxGeometry(0.75, 0.55, 0.55),
-            new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9, roughness: 0.2 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.15, roughness: 0.3 })
         );
         espresso.position.set(x - 0.8, 1.51, z);
         espresso.castShadow = true;
@@ -1388,10 +1821,10 @@ class Office3D {
             this.officeGroup.add(mug);
         }
 
-        // Water Cooler Dispenser (Neatly placed next to counter)
+        // Water Cooler Dispenser (T8: coolerBody = 0xC9CDD2)
         const coolerBody = new THREE.Mesh(
             new THREE.BoxGeometry(0.65, 1.35, 0.65),
-            new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.3 })
+            new THREE.MeshStandardMaterial({ color: 0xC9CDD2, roughness: 0.3 })
         );
         coolerBody.position.set(x + 1.9, 0.675, z);
         coolerBody.castShadow = true;
@@ -1408,36 +1841,35 @@ class Office3D {
     buildLoungeDecor() {
         const isLight = this.currentTheme === 'light';
 
-        // 1. Sleek Modern Coffee Table in Lounge Center (Spans x: 2.95 to 4.65, z: 6.75 to 7.65)
-        // Perfectly proportioned with 67.5cm - 87.5cm clearance to surrounding sofas
+        // 1. Sleek Modern Coffee Table in Lounge Center (T5: Base PALETTE.rack = 0x46546b, Inlay PALETTE.sofa[0] = 0xe9dfcf)
         const coffeeTable = new THREE.Mesh(
             new THREE.BoxGeometry(1.7, 0.40, 0.90),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x64748b : 0x334155, roughness: 0.25 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.rack : 0x334155, roughness: 0.35 })
         );
         coffeeTable.position.set(3.8, 0.20, 7.2);
         coffeeTable.castShadow = true;
         coffeeTable.receiveShadow = true;
         this.officeGroup.add(coffeeTable);
 
-        // Table Top Chamfer / Marble Inlay
+        // Table Top Inlay
         const tableInlay = new THREE.Mesh(
             new THREE.BoxGeometry(1.58, 0.03, 0.78),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0xf8fafc : 0x1e293b, roughness: 0.15 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.sofa[0] : 0x1e293b, roughness: 0.25 })
         );
         tableInlay.position.set(3.8, 0.41, 7.2);
         this.officeGroup.add(tableInlay);
 
-        // Ceramic Succulent Planter on Coffee Table
+        // Ceramic Succulent Planter on Coffee Table (T8: pot = 0xe6ded0, plant = 0x5fa777)
         const bowl = new THREE.Mesh(
             new THREE.CylinderGeometry(0.18, 0.14, 0.08, 16),
-            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.pot, roughness: 0.35 })
         );
         bowl.position.set(3.8, 0.47, 7.2);
         this.officeGroup.add(bowl);
 
         const succulent = new THREE.Mesh(
             new THREE.DodecahedronGeometry(0.10, 0),
-            new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.5 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.plant, roughness: 0.55 })
         );
         succulent.position.set(3.8, 0.54, 7.2);
         this.officeGroup.add(succulent);
@@ -1459,30 +1891,7 @@ class Office3D {
         mag2.rotation.y = -0.12;
         this.officeGroup.add(mag2);
 
-        // 2. Modern Overhead Warm Ring Chandelier (Pendant Lamp centered directly over Lounge Table)
-        const ringChandelier = new THREE.Mesh(
-            new THREE.TorusGeometry(1.2, 0.03, 16, 48),
-            new THREE.MeshStandardMaterial({
-                color: 0xffedd5,
-                emissive: 0xf59e0b,
-                emissiveIntensity: isLight ? 1.0 : 1.3,
-                roughness: 0.2
-            })
-        );
-        ringChandelier.rotation.x = Math.PI / 2;
-        ringChandelier.position.set(3.8, 3.4, 7.2);
-        this.officeGroup.add(ringChandelier);
-
-        // Chandelier suspension wires
-        for (let i = 0; i < 3; i++) {
-            const angle = (i / 3) * Math.PI * 2;
-            const wire = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.005, 0.005, 1.1, 8),
-                new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.8 })
-            );
-            wire.position.set(3.8 + Math.cos(angle) * 1.2, 3.95, 7.2 + Math.sin(angle) * 1.2);
-            this.officeGroup.add(wire);
-        }
+        
 
         // 3. Lounge Bookshelf / Credenza (Neatly placed along right wall, clear of any chairs)
         const credenza = new THREE.Mesh(
@@ -1526,8 +1935,8 @@ class Office3D {
         board.castShadow = true;
         wbGroup.add(board);
 
-        // Black metal frame & stand on casters
-        const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8 });
+        // Clean architectural frame & stand on casters (T8: 0x5C6B80)
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x5C6B80, metalness: 0.5, roughness: 0.4 });
         const leftPole = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.75, 0.05), frameMat);
         leftPole.position.set(-1.08, 1.05, 0);
         wbGroup.add(leftPole);
@@ -1550,7 +1959,7 @@ class Office3D {
         posterGroup.position.set(-2.6, 0, 8.2);
         posterGroup.rotation.y = 0.35; // Angled towards central view
 
-        const easelMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.5 });
+        const easelMat = new THREE.MeshStandardMaterial({ color: PALETTE.dark, roughness: 0.45 });
         const easelLegL = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.3, 8), easelMat);
         easelLegL.position.set(-0.42, 1.15, -0.05);
         easelLegL.rotation.z = -0.18;
@@ -1585,11 +1994,16 @@ class Office3D {
 
     buildServerRacks(x, z) {
         this.serverLeds = [];
+        const rackMat = new THREE.MeshStandardMaterial({
+            color: PALETTE.rack, // T3: 0x46546b (raises luminance above 10% to eliminate dark hole)
+            metalness: 0.5,
+            roughness: 0.45
+        });
         for (let r = 0; r < 2; r++) {
             const rx = x + r * 1.5;
             const rack = new THREE.Mesh(
                 new THREE.BoxGeometry(1.2, 3.4, 0.9),
-                new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 })
+                rackMat
             );
             rack.position.set(rx, 1.7, z);
             rack.castShadow = true;
@@ -1598,7 +2012,7 @@ class Office3D {
             for (let s = 0; s < 6; s++) {
                 const led = new THREE.Mesh(
                     new THREE.BoxGeometry(0.06, 0.06, 0.04),
-                    new THREE.MeshBasicMaterial({ color: s % 2 === 0 ? 0x10b981 : 0x06b6d4 })
+                    new THREE.MeshBasicMaterial({ color: s % 2 === 0 ? PALETTE.accent.teal : PALETTE.accent.amber })
                 );
                 led.position.set(rx - 0.4 + (s % 3) * 0.3, 0.6 + s * 0.45, z + 0.47);
                 this.officeGroup.add(led);
@@ -1615,7 +2029,7 @@ class Office3D {
 
         const seat = new THREE.Mesh(
             new THREE.BoxGeometry(0.65, 0.1, 0.65),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x475569 : 0x1e293b, roughness: 0.6 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.sofa[1] : 0x334155, roughness: 0.6 }) // 0xb8c9b5
         );
         seat.position.y = 0.55;
         seat.castShadow = true;
@@ -1623,7 +2037,7 @@ class Office3D {
 
         const back = new THREE.Mesh(
             new THREE.BoxGeometry(0.65, 0.6, 0.1),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x64748b : 0x334155, roughness: 0.6 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.sofa[1] : 0x475569, roughness: 0.6 })
         );
         back.position.set(0, 0.85, -0.28);
         back.castShadow = true;
@@ -1631,7 +2045,7 @@ class Office3D {
 
         const stem = new THREE.Mesh(
             new THREE.CylinderGeometry(0.06, 0.06, 0.55, 12),
-            new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.35 }) // 0x2f3a4b avoids pure black
         );
         stem.position.y = 0.28;
         chair.add(stem);
@@ -1645,7 +2059,7 @@ class Office3D {
 
         const pot = new THREE.Mesh(
             new THREE.CylinderGeometry(0.35, 0.25, 0.7, 16),
-            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.pot, roughness: 0.35 }) // T8: 0xe6ded0 warm stone ceramic
         );
         pot.position.y = 0.35;
         pot.castShadow = true;
@@ -1653,12 +2067,12 @@ class Office3D {
 
         const soil = new THREE.Mesh(
             new THREE.CylinderGeometry(0.33, 0.33, 0.1, 16),
-            new THREE.MeshStandardMaterial({ color: 0x3f2d1d, roughness: 0.9 })
+            new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.9 })
         );
         soil.position.y = 0.68;
         plant.add(soil);
 
-        const leafMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.6 });
+        const leafMat = new THREE.MeshStandardMaterial({ color: PALETTE.plant, roughness: 0.55 }); // T8: 0x5fa777 saturated green
         for (let l = 0; l < 5; l++) {
             const leaf = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 0), leafMat);
             const angle = (l / 5) * Math.PI * 2;
@@ -1792,10 +2206,8 @@ class Office3D {
         this.sofaMaterials = [];
         const isLight = this.currentTheme === 'light';
 
-        // 1. Main 3-Seater Sofa (At z = 8.85, facing south towards coffee table at z = 7.2)
-        // Generous 67.5cm clearance to coffee table (Zero leg clipping, realistic seating space)
-        // Scandinavian Mint / Sage Green Sofa (Matches Reference Image)
-        const mainSofaColor = isLight ? 0xc2d5c3 : 0x064e3b;
+        // 1. Main 3-Seater Sofa (T8: PALETTE.sofa[1] = 0x4c6489 Biru-Abu)
+        const mainSofaColor = isLight ? PALETTE.sofa[1] : 0x2e4a3d;
         const mainSofa = this.createSofaMesh(2.8, 1.05, mainSofaColor, isLight);
         mainSofa.position.set(3.8, 0, 8.85);
         mainSofa.rotation.y = Math.PI; // Facing -Z (towards coffee table)
@@ -1825,9 +2237,8 @@ class Office3D {
             mesh: mainSofa
         });
 
-        // 2. Kursi Sofa Single Kiri (Armchair 1 - facing coffee table from left)
-        // Generous 87.5cm clearance to coffee table
-        const armchairColor1 = isLight ? 0x4d8c6b : 0x047857; // Forest green armchair
+        // 2. Kursi Sofa Single Kiri (Armchair 1 - T8: PALETTE.accentChair = 0xe07b3a oranye)
+        const armchairColor1 = isLight ? PALETTE.accentChair : 0xb45309;
         const leftArmchair = this.createSofaMesh(1.15, 1.05, armchairColor1, isLight);
         leftArmchair.position.set(1.55, 0, 7.2);
         leftArmchair.rotation.y = Math.PI / 2; // Facing +X (towards coffee table)
@@ -1844,9 +2255,8 @@ class Office3D {
             mesh: leftArmchair
         });
 
-        // 3. Kursi Sofa Single Kanan (Armchair 2 - facing coffee table from right)
-        // 87.5cm clearance to table, and 72.5cm walkway clearance to coffee counter
-        const armchairColor2 = isLight ? 0xe29578 : 0xb45309; // Peach / terracotta armchair
+        // 3. Kursi Sofa Single Kanan (Armchair 2 - T8: PALETTE.sage = 0x9ebfa8 sage)
+        const armchairColor2 = isLight ? PALETTE.sage : 0x2e4a3d;
         const rightArmchair = this.createSofaMesh(1.15, 1.05, armchairColor2, isLight);
         rightArmchair.position.set(6.05, 0, 7.2);
         rightArmchair.rotation.y = -Math.PI / 2; // Facing -X (towards coffee table)
@@ -1863,9 +2273,8 @@ class Office3D {
             mesh: rightArmchair
         });
 
-        // 4. Kursi Sofa Depan (2-Seater facing coffee table from south)
-        // Generous 67.5cm clearance to coffee table
-        const frontSofaColor = isLight ? 0xc2d5c3 : 0x064e3b;
+        // 4. Kursi Sofa Depan (2-Seater - T8: PALETTE.sofa[0] = 0xf1eadc krem oat)
+        const frontSofaColor = isLight ? PALETTE.sofa[0] : 0x3d3830;
         const frontSofa = this.createSofaMesh(2.0, 1.05, frontSofaColor, isLight);
         frontSofa.position.set(3.8, 0, 5.55);
         frontSofa.rotation.y = 0; // Facing +Z (towards coffee table)
@@ -2034,26 +2443,8 @@ class Office3D {
 
         this.applyThemeColors();
 
-        if (this.renderer && THREE.ACESFilmicToneMapping) {
-            this.renderer.toneMappingExposure = isLight ? 1.0 : 1.25;
-        }
-
-        if (this.hemiLight) {
-            this.hemiLight.color.setHex(isLight ? 0xfffbeb : 0x38bdf8);
-            this.hemiLight.groundColor.setHex(isLight ? 0xa89f91 : 0x090d16);
-            this.hemiLight.intensity = isLight ? 0.32 : 0.40;
-        }
-
-        if (this.ambientLight) {
-            this.ambientLight.color.setHex(isLight ? 0xf8fafc : 0xdbeafe);
-            this.ambientLight.intensity = isLight ? 0.38 : 0.55;
-        }
-
-        if (this.dirLight) {
-            this.dirLight.color.setHex(isLight ? 0xfffaf0 : 0xffffff);
-            this.dirLight.intensity = isLight ? 1.30 : 0.95;
-            this.dirLight.shadow.radius = isLight ? 1.8 : 2.5;
-        }
+        // T4: Calibrate all lights through applyLightingPreset
+        this.applyLightingPreset();
 
         if (this.floorMat) {
             this.floorMat.map = isLight ? this.cachedTextures.floorLight : this.cachedTextures.floorDark;
@@ -2061,37 +2452,38 @@ class Office3D {
             this.floorMat.needsUpdate = true;
         }
 
-        if (this.carpetLeft) {
-            this.carpetLeft.material.color.setHex(isLight ? 0x2563eb : 0x1e3a8a);
-            this.carpetLeft.material.opacity = isLight ? 0.52 : 0.25;
-        }
-        if (this.carpetRight) {
-            this.carpetRight.material.color.setHex(isLight ? 0x7c3aed : 0x312e81);
-            this.carpetRight.material.opacity = isLight ? 0.52 : 0.25;
-        }
+        // T6: Update zone carpets
         if (this.carpetLounge) {
-            this.carpetLounge.material.color.setHex(isLight ? 0xc2410c : 0x7c2d12);
-            this.carpetLounge.material.opacity = isLight ? 0.55 : 0.3;
+            this.carpetLounge.material.color.setHex(isLight ? PALETTE.rugLounge : 0x1e3a5a);
+        }
+        if (this.carpetMeeting) {
+            this.carpetMeeting.material.color.setHex(isLight ? PALETTE.rugMeeting : 0x4a1f1c);
+        }
+
+        // T5: Update grass ground
+        if (this.grassMat) {
+            this.grassMat.color.setHex(isLight ? PALETTE.grass : PALETTE.grassDark);
         }
 
         if (this.wallMat) {
-            this.wallMat.color.setHex(isLight ? 0x334155 : 0x0f172a);
+            this.wallMat.color.setHex(isLight ? PALETTE.wall : PALETTE.wallDark);
         }
 
         if (this.baseboardMat) {
-            this.baseboardMat.color.setHex(isLight ? 0x0f172a : 0x38bdf8);
+            this.baseboardMat.color.setHex(isLight ? PALETTE.trim : PALETTE.trimDark);
         }
 
-        if (this.winFrameMat) {
-            this.winFrameMat.color.setHex(isLight ? 0xffffff : 0x1e293b);
-        }
+                if (this.winFrameMat)  this.winFrameMat.color.setHex(isLight ? PALETTE.frame : 0x475569);
+        if (this.winCasingMat) this.winCasingMat.color.setHex(isLight ? 0xF1EADC : 0x5B6478);
+        if (this.winJambMat)   this.winJambMat.color.setHex(isLight ? 0xCBBFA6 : 0x3C4760);
+        (this.winViewMats || []).forEach(m => m.color.setHex(isLight ? 0xFFFFFF : 0x5A6A85));
 
         // Update desks & text badges
         for (const [id, agentUnit] of this.agents.entries()) {
             const agent = agentUnit.userData.agentData;
             const deskTop = agentUnit.deskGroup.getObjectByName(`DeskTop_${id}`);
             if (deskTop) {
-                deskTop.material.color.setHex(isLight ? 0xded4c3 : 0x1e293b);
+                deskTop.material.color.setHex(isLight ? PALETTE.wood : 0x334155);
             }
 
             const oldSprite = agentUnit.avatarGroup.getObjectByName(`BadgeSprite_${id}`);
@@ -2101,7 +2493,7 @@ class Office3D {
                 oldSprite.material.dispose();
 
                 const newSprite = this.createTextBadgeSprite(agent.name, agent.role, agent.status);
-                newSprite.position.set(0, 2.7, 0);
+                newSprite.position.set(0, 2.35, 0);
                 newSprite.name = `BadgeSprite_${id}`;
                 agentUnit.avatarGroup.add(newSprite);
             }
@@ -2136,6 +2528,421 @@ class Office3D {
         });
     }
 
+    _capsule(r, len, mat) {
+        const pts = [];
+        const half = len / 2;
+        for (let i = 0; i <= 8; i++) {
+            const a = -Math.PI / 2 + (i / 8) * (Math.PI / 2);
+            pts.push(new THREE.Vector2(Math.max(Math.cos(a) * r, 0.0001), -half + Math.sin(a) * r));
+        }
+        for (let i = 0; i <= 8; i++) {
+            const a = (i / 8) * (Math.PI / 2);
+            pts.push(new THREE.Vector2(Math.max(Math.cos(a) * r, 0.0001), half + Math.sin(a) * r));
+        }
+        const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 16), mat);
+        m.castShadow = true;
+        return m;
+    }
+
+    _ellipsoid(rx, ry, rz, mat, seg = 20) {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(1, seg, Math.max(8, Math.round(seg * 0.7))), mat);
+        m.scale.set(rx, ry, rz);
+        m.castShadow = true;
+        return m;
+    }
+
+    buildAvatarRig(id, agent) {
+        const avatarGroup = new THREE.Group();
+        avatarGroup.name = `AvatarGroup_${id}`;
+        avatarGroup.userData = { agentId: id, agentData: agent, isAvatar: true };
+
+        const bodyRoot = new THREE.Group();
+        bodyRoot.name = `BodyRoot_${id}`;
+        avatarGroup.add(bodyRoot);
+
+        // Gender distinction
+        const rawGender = (agent.gender || '').toLowerCase();
+        const isFemale = rawGender === 'female' || rawGender === 'perempuan' || rawGender === 'wanita';
+
+        // ---------- Variasi per agent ----------
+        const skinTones = isFemale 
+            ? [0xF6D3B7, 0xE7B892, 0xCCA07A, 0x9B684C]
+            : [0xF2C6A0, 0xE0A87C, 0xC68A5E, 0x8D5A3B];
+        const hairTones = isFemale
+            ? [0x221815, 0x503322, 0x1C1C22, 0x7E492B, 0x5C3B30]
+            : [0x2B2118, 0x4A3222, 0x1E1E24, 0x7A4B28, 0x5B4636];
+        const skinHex = skinTones[id % skinTones.length];
+        const hairHex = hairTones[(id * 3 + 1) % hairTones.length];
+        const avatarColorHex = agent.avatar_color ? parseInt(agent.avatar_color.replace('#', '0x'), 16) : (isFemale ? 0xec4899 : 0x4C6489);
+
+        // ---------- Material ----------
+        const hoodieMat = new THREE.MeshStandardMaterial({ color: avatarColorHex, roughness: 0.75 });
+        const trimMat   = new THREE.MeshStandardMaterial({ color: new THREE.Color(avatarColorHex).multiplyScalar(0.78), roughness: 0.8 });
+        const skinMat   = new THREE.MeshStandardMaterial({ color: skinHex, roughness: 0.55 });
+        const hairMat   = new THREE.MeshStandardMaterial({ color: hairHex, roughness: 0.6 });
+        const pantsMat  = new THREE.MeshStandardMaterial({ color: isFemale ? 0x2E3544 : 0x3A4252, roughness: 0.8 });
+        const shoeMat   = new THREE.MeshStandardMaterial({ color: 0x3A4048, roughness: 0.5 });
+        const soleMat   = new THREE.MeshStandardMaterial({ color: 0xEDE8DC, roughness: 0.6 });
+        const creamMat  = new THREE.MeshStandardMaterial({ color: 0xEDE8DC, roughness: 0.5 });
+
+        // ---------- Pinggul ----------
+        const hips = this._ellipsoid(isFemale ? 0.25 : 0.27, 0.12, isFemale ? 0.18 : 0.19, pantsMat);
+        hips.position.y = 0.58;
+        bodyRoot.add(hips);
+
+        // ---------- Kaki (nama pivot sama persis untuk animasi) ----------
+        const makeLeg = (sx, side) => {
+            const thighPivot = new THREE.Group();
+            thighPivot.name = `${side}ThighPivot_${id}`;
+            thighPivot.position.set(sx, 0.56, 0.02);
+            bodyRoot.add(thighPivot);
+
+            const thighRadius = isFemale ? 0.078 : 0.085;
+            const calfRadius  = isFemale ? 0.062 : 0.070;
+
+            const thigh = this._capsule(thighRadius, 0.13, pantsMat);
+            thigh.position.y = -0.14;
+            thighPivot.add(thigh);
+
+            const knee = new THREE.Group();
+            knee.name = `${side}KneePivot_${id}`;
+            knee.position.y = -0.28;
+            thighPivot.add(knee);
+
+            const calf = this._capsule(calfRadius, 0.12, pantsMat);
+            calf.position.y = -0.12;
+            knee.add(calf);
+
+            const shoe = new THREE.Group();
+            shoe.position.set(0, -0.25, 0.04);
+            knee.add(shoe);
+            const upper = this._ellipsoid(isFemale ? 0.078 : 0.085, 0.055, 0.135, shoeMat);
+            upper.position.set(0, 0, 0.01);
+            shoe.add(upper);
+            const sole = this._ellipsoid(isFemale ? 0.082 : 0.090, 0.02, 0.140, soleMat);
+            sole.position.set(0, -0.045, 0.01);
+            shoe.add(sole);
+        };
+        const legSpacing = isFemale ? 0.14 : 0.16;
+        makeLeg(-legSpacing, 'Left');
+        makeLeg(legSpacing, 'Right');
+
+        // ---------- Torso ----------
+        const spinePivot = new THREE.Group();
+        spinePivot.name = `SpinePivot_${id}`;
+        spinePivot.position.set(0, 0.58, 0);
+        bodyRoot.add(spinePivot);
+
+        const torso = this._capsule(isFemale ? 0.20 : 0.22, 0.2, hoodieMat);
+        torso.scale.set(isFemale ? 1.18 : 1.3, 1, isFemale ? 0.78 : 0.85);
+        torso.position.y = 0.31;
+        spinePivot.add(torso);
+
+        const hem = this._ellipsoid(isFemale ? 0.25 : 0.29, 0.04, isFemale ? 0.18 : 0.20, trimMat);
+        hem.position.y = 0.02;
+        spinePivot.add(hem);
+
+        const hood = this._ellipsoid(isFemale ? 0.15 : 0.17, 0.11, 0.10, trimMat);
+        hood.position.set(0, 0.64, -0.13);
+        spinePivot.add(hood);
+
+        const pocket = this._ellipsoid(isFemale ? 0.14 : 0.17, 0.07, 0.04, trimMat);
+        pocket.position.set(0, 0.15, isFemale ? 0.16 : 0.18);
+        spinePivot.add(pocket);
+
+        [-0.045, 0.045].forEach(dx => {
+            const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.12, 6), creamMat);
+            cord.position.set(dx, 0.5, isFemale ? 0.165 : 0.175);
+            spinePivot.add(cord);
+        });
+
+        const idBadge = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.14, 0.015), creamMat);
+        idBadge.position.set(isFemale ? -0.12 : -0.14, 0.35, isFemale ? 0.175 : 0.185);
+        spinePivot.add(idBadge);
+
+        // ---------- Kepala ----------
+        const headPivot = new THREE.Group();
+        headPivot.name = `HeadPivot_${id}`;
+        headPivot.position.set(0, 0.62, 0);
+        spinePivot.add(headPivot);
+
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(isFemale ? 0.065 : 0.075, isFemale ? 0.075 : 0.085, 0.12, 12), skinMat);
+        neck.position.y = 0.04;
+        headPivot.add(neck);
+
+        const head = this._ellipsoid(isFemale ? 0.225 : 0.235, 0.250, isFemale ? 0.225 : 0.235, skinMat, 28);
+        head.position.y = 0.33;
+        head.name = `HeadMesh_${id}`;
+        headPivot.add(head);
+
+        [-1, 1].forEach(s => {
+            const ear = this._ellipsoid(0.028, 0.042, 0.025, skinMat, 12);
+            ear.position.set(s * (isFemale ? 0.222 : 0.232), 0.33, 0);
+            headPivot.add(ear);
+        });
+
+        const nose = this._ellipsoid(isFemale ? 0.020 : 0.025, 0.026, 0.026, skinMat, 12);
+        nose.position.set(0, 0.31, isFemale ? 0.228 : 0.235);
+        headPivot.add(nose);
+
+        // Mata: sklera + iris + highlight + eyelashes untuk perempuan
+        const scleraMat = new THREE.MeshStandardMaterial({ color: 0xF6F3EC, roughness: 0.3 });
+        const irisMat   = new THREE.MeshStandardMaterial({ color: 0x2B2118, roughness: 0.2 });
+        const shineMat  = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+        [-1, 1].forEach(s => {
+            const eye = new THREE.Group();
+            eye.name = s < 0 ? `EyeL_${id}` : `EyeR_${id}`;
+            eye.position.set(s * 0.085, 0.36, isFemale ? 0.198 : 0.205);
+            const white = this._ellipsoid(0.045, isFemale ? 0.055 : 0.052, 0.025, scleraMat, 14);
+            const iris  = this._ellipsoid(0.028, isFemale ? 0.036 : 0.034, 0.015, irisMat, 12);
+            iris.position.z = 0.02;
+            const shine = this._ellipsoid(0.010, 0.010, 0.006, shineMat, 8);
+            shine.position.set(0.012, 0.012, 0.034);
+            eye.add(white, iris, shine);
+
+            // Feminine eyelash wing
+            if (isFemale) {
+                const lash = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.009, 0.012), hairMat);
+                lash.position.set(s * 0.035, 0.036, 0.022);
+                lash.rotation.z = -s * 0.38;
+                eye.add(lash);
+            }
+
+            headPivot.add(eye);
+
+            const brow = new THREE.Mesh(
+                new THREE.BoxGeometry(isFemale ? 0.065 : 0.075, isFemale ? 0.010 : 0.015, 0.012), 
+                hairMat
+            );
+            brow.position.set(s * 0.085, 0.425, isFemale ? 0.195 : 0.20);
+            brow.rotation.z = -s * (isFemale ? 0.08 : 0.12);
+            headPivot.add(brow);
+
+            // Rosy blush
+            const cheek = this._ellipsoid(isFemale ? 0.040 : 0.035, 0.022, 0.01, new THREE.MeshStandardMaterial({
+                color: isFemale ? 0xF2889B : 0xE89A8C, transparent: true, opacity: isFemale ? 0.60 : 0.45, roughness: 0.8
+            }), 10);
+            cheek.position.set(s * 0.14, 0.29, isFemale ? 0.180 : 0.185);
+            cheek.rotation.y = s * 0.5;
+            headPivot.add(cheek);
+        });
+
+        // Senyum
+        const mouthMat = new THREE.MeshStandardMaterial({ 
+            color: isFemale ? 0xBA4754 : 0x8A3B3B, 
+            roughness: 0.5 
+        });
+        const mouth = new THREE.Mesh(
+            new THREE.TorusGeometry(isFemale ? 0.042 : 0.045, isFemale ? 0.008 : 0.007, 6, 14, Math.PI),
+            mouthMat
+        );
+        mouth.rotation.z = Math.PI;
+        mouth.position.set(0, 0.245, isFemale ? 0.212 : 0.218);
+        headPivot.add(mouth);
+
+        // Rambut: Berdasarkan Gender
+        if (isFemale) {
+            // Female hair cap: graceful and slightly longer coverage
+            const hairCap = new THREE.Mesh(
+                new THREE.SphereGeometry(0.250, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.52),
+                hairMat
+            );
+            hairCap.position.set(0, 0.35, -0.01);
+            hairCap.rotation.x = -0.32;
+            hairCap.castShadow = true;
+            headPivot.add(hairCap);
+
+            // Flowing back hair
+            const hairBack = this._ellipsoid(0.25, 0.28, 0.22, hairMat);
+            hairBack.position.set(0, 0.24, -0.08);
+            headPivot.add(hairBack);
+
+            // Feminine Hairstyles:
+            if (id % 2 === 0) {
+                // Style A: Long flowing twin locks / side strands falling in front of shoulders
+                [-1, 1].forEach(s => {
+                    const sideLock = this._capsule(0.045, 0.34, hairMat);
+                    sideLock.position.set(s * 0.21, 0.14, 0.06);
+                    sideLock.rotation.z = -s * 0.12;
+                    headPivot.add(sideLock);
+                });
+                // Cute front bangs
+                const bangs = this._ellipsoid(0.18, 0.05, 0.08, hairMat);
+                bangs.position.set(0.02, 0.47, 0.16);
+                bangs.rotation.z = -0.15;
+                headPivot.add(bangs);
+            } else {
+                // Style B: High ponytail with accent scrunchie + soft side bangs
+                const scrunchie = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.045, 0.018, 8, 16),
+                    new THREE.MeshStandardMaterial({ color: PALETTE.accent.coral, roughness: 0.4 })
+                );
+                scrunchie.position.set(0, 0.56, -0.18);
+                scrunchie.rotation.x = 0.6;
+                headPivot.add(scrunchie);
+
+                const ponyTail = this._capsule(0.065, 0.32, hairMat);
+                ponyTail.position.set(0, 0.48, -0.28);
+                ponyTail.rotation.x = -0.7;
+                headPivot.add(ponyTail);
+
+                const sideBangs = this._ellipsoid(0.19, 0.05, 0.09, hairMat);
+                sideBangs.position.set(0.04, 0.48, 0.16);
+                sideBangs.rotation.z = -0.22;
+                headPivot.add(sideBangs);
+            }
+        } else {
+            // Male hair styles:
+            const hairCap = new THREE.Mesh(
+                new THREE.SphereGeometry(0.255, 28, 18, 0, Math.PI * 2, 0, Math.PI * 0.48),
+                hairMat
+            );
+            hairCap.position.set(0, 0.345, -0.01);
+            hairCap.rotation.x = -0.35;
+            hairCap.castShadow = true;
+            headPivot.add(hairCap);
+
+            const hairBack = this._ellipsoid(0.24, 0.19, 0.2, hairMat);
+            hairBack.position.set(0, 0.30, -0.07);
+            headPivot.add(hairBack);
+
+            if (id % 2 === 0) {
+                // Short modern textured quiff
+                const quiff = this._ellipsoid(0.16, 0.06, 0.12, hairMat);
+                quiff.position.set(0, 0.55, 0.08);
+                quiff.rotation.x = 0.25;
+                headPivot.add(quiff);
+            } else {
+                // Side-parted clean crop
+                const fringe = this._ellipsoid(0.20, 0.05, 0.09, hairMat);
+                fringe.position.set(0.04, 0.47, 0.16);
+                fringe.rotation.z = -0.2;
+                headPivot.add(fringe);
+            }
+        }
+
+        // Headset (band melintasi atas kepala dari telinga ke telinga)
+        const headsetMat = new THREE.MeshStandardMaterial({ color: isFemale ? 0x3A4454 : 0x2F3A4B, roughness: 0.4, metalness: 0.1 });
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.022, 8, 28, Math.PI), headsetMat);
+        band.position.set(0, 0.34, 0);
+        headPivot.add(band);
+
+        [-1, 1].forEach(s => {
+            const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 18), headsetMat);
+            cup.rotation.z = Math.PI / 2;
+            cup.position.set(s * 0.255, 0.34, 0);
+            headPivot.add(cup);
+        });
+
+        const statusHex = agent.status === 'KERJA' ? PALETTE.accent.teal : PALETTE.accent.amber;
+        const rgbMat = new THREE.MeshBasicMaterial({ color: statusHex });
+        const rgbRingL = new THREE.Mesh(new THREE.RingGeometry(0.035, 0.06, 16), rgbMat);
+        rgbRingL.rotation.y = -Math.PI / 2;
+        rgbRingL.position.set(-0.283, 0.34, 0);
+        rgbRingL.name = `RgbRingL_${id}`;
+        headPivot.add(rgbRingL);
+
+        const rgbRingR = rgbRingL.clone();
+        rgbRingR.rotation.y = Math.PI / 2;
+        rgbRingR.position.x = 0.283;
+        rgbRingR.name = `RgbRingR_${id}`;
+        headPivot.add(rgbRingR);
+
+        // ---------- Lengan ----------
+        const makeArm = (sx, side) => {
+            const armPivot = new THREE.Group();
+            armPivot.name = `${side}ArmPivot_${id}`;
+            armPivot.position.set(sx, 0.56, 0);
+            spinePivot.add(armPivot);
+
+            const shoulderRadius = isFemale ? 0.068 : 0.075;
+            const armRadius      = isFemale ? 0.050 : 0.058;
+            const foreRadius     = isFemale ? 0.044 : 0.050;
+
+            armPivot.add(this._ellipsoid(shoulderRadius, shoulderRadius, shoulderRadius, hoodieMat));
+
+            const upper = this._capsule(armRadius, 0.164, hoodieMat);
+            upper.position.y = -0.13;
+            armPivot.add(upper);
+
+            const elbow = new THREE.Group();
+            elbow.name = `${side}ElbowPivot_${id}`;
+            elbow.position.y = -0.26;
+            armPivot.add(elbow);
+
+            const fore = this._capsule(foreRadius, 0.14, hoodieMat);
+            fore.position.y = -0.11;
+            elbow.add(fore);
+
+            const cuff = this._ellipsoid(foreRadius + 0.004, 0.025, foreRadius + 0.004, trimMat);
+            cuff.position.y = -0.215;
+            elbow.add(cuff);
+
+            const hand = this._ellipsoid(isFemale ? 0.044 : 0.05, isFemale ? 0.050 : 0.055, 0.042, skinMat);
+            hand.position.y = -0.25;
+            elbow.add(hand);
+
+            return elbow;
+        };
+        const armSpacing = isFemale ? 0.29 : 0.33;
+        makeArm(-armSpacing, 'Left');
+        const rightElbow = makeArm(armSpacing, 'Right');
+
+        // Cangkir kopi di tangan kanan (aktif saat di lounge)
+        const cup = new THREE.Group();
+        cup.name = `CoffeeCup_${id}`;
+        cup.position.set(0, -0.26, 0.08);
+        const cupBody = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.05, 0.12, 16),
+            new THREE.MeshStandardMaterial({ color: PALETTE.accent.coral, roughness: 0.3 })
+        );
+        cupBody.castShadow = true;
+        cup.add(cupBody);
+        const handle = new THREE.Mesh(
+            new THREE.TorusGeometry(0.035, 0.008, 6, 12, Math.PI),
+            cupBody.material
+        );
+        handle.rotation.z = -Math.PI / 2;
+        handle.position.set(0.06, 0, 0);
+        cup.add(handle);
+        const liquid = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.052, 0.052, 0.02, 14),
+            new THREE.MeshStandardMaterial({ color: 0x3F2D1D, roughness: 0.2 })
+        );
+        liquid.position.y = 0.05;
+        cup.add(liquid);
+        const steam = new THREE.Mesh(
+            new THREE.ConeGeometry(0.04, 0.12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.35 })
+        );
+        steam.position.y = 0.12;
+        cup.add(steam);
+        cup.visible = false;
+        rightElbow.add(cup);
+
+        // ---------- Badge nama + ring seleksi ----------
+        const badgeSprite = this.createTextBadgeSprite(agent.name, agent.role, agent.status);
+        badgeSprite.position.set(0, 2.35, 0);
+        badgeSprite.name = `BadgeSprite_${id}`;
+        avatarGroup.add(badgeSprite);
+
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(1.4, 1.55, 32),
+            new THREE.MeshBasicMaterial({ color: PALETTE.accent.teal, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.03;
+        ring.visible = false;
+        ring.name = `SelectRing_${id}`;
+        avatarGroup.add(ring);
+
+        avatarGroup.traverse(child => {
+            if (child.isMesh) child.userData.parentAgentId = id;
+        });
+
+        return avatarGroup;
+    }
+
     /**
      * Builds realistic Workstation Desk and fully Articulated Avatar Rig
      */
@@ -2154,10 +2961,10 @@ class Office3D {
         deskGroup.rotation.y = rotY;
         deskGroup.userData = { agentId: id, agentData: agent, isDesk: true };
 
-        // Desk Surface (Scandinavian Blonde Birch Wood - Matches Reference Image)
+        // Desk Surface (T5: PALETTE.wood = 0xc7b8a0 warm blonde wood)
         const deskTop = new THREE.Mesh(
             new THREE.BoxGeometry(2.4, 0.1, 1.3),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0xded4c3 : 0x1e293b, roughness: 0.35 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.wood : 0x334155, roughness: 0.35 })
         );
         deskTop.position.y = 1.05;
         deskTop.castShadow = true;
@@ -2165,8 +2972,8 @@ class Office3D {
         deskTop.name = `DeskTop_${id}`;
         deskGroup.add(deskTop);
 
-        // Sleek Minimalist Matte Black Steel Desk Legs
-        const legMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.8, roughness: 0.3 });
+        // Sleek Minimalist Steel Desk Legs (T3: PALETTE.dark = 0x2f3a4b avoids pure black)
+        const legMat = new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.6, roughness: 0.4 });
         const legOffsets = [
             [-1.1, 0.525, -0.55],
             [1.1, 0.525, -0.55],
@@ -2180,38 +2987,38 @@ class Office3D {
             deskGroup.add(leg);
         });
 
-        // Open & Airy Workstation (Subtle low rim instead of tall clunky divider)
+        // Open & Airy Workstation (Subtle low rim)
         const divider = new THREE.Mesh(
             new THREE.BoxGeometry(2.35, 0.12, 0.03),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0xc4b7a6 : 0x334155, roughness: 0.6 })
+            new THREE.MeshStandardMaterial({ color: isLight ? 0xb5a58d : 0x475569, roughness: 0.6 })
         );
         divider.position.set(0, 1.15, -0.62);
         deskGroup.add(divider);
 
-        // Desk Mat / Mousepad (Placed on the front half of the desk)
+        // Desk Mat / Mousepad (T3: PALETTE.rack = 0x46546b)
         const deskMat = new THREE.Mesh(
             new THREE.BoxGeometry(1.6, 0.01, 0.55),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x334155 : 0x0f172a, roughness: 0.9 })
+            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.rack : 0x212632, roughness: 0.8 })
         );
         deskMat.position.set(0, 1.105, 0.32);
         deskGroup.add(deskMat);
 
-        // Laptop Base
+        // Laptop Base (T3: PALETTE.dark = 0x2f3a4b)
         const laptopBase = new THREE.Mesh(
             new THREE.BoxGeometry(0.65, 0.03, 0.45),
-            new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.2 })
+            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.3 })
         );
         laptopBase.position.set(0, 1.11, 0.20);
         laptopBase.castShadow = true;
         deskGroup.add(laptopBase);
 
-        // Glowing Laptop Screen with IDE Code Editor Texture
+        // Glowing Laptop Screen with IDE Code Editor Texture (T10: PALETTE.accent.teal)
         const isWorking = agent.status === 'KERJA';
         const laptopScreenMat = new THREE.MeshStandardMaterial({
             map: this.cachedTextures.codeEditor,
             emissiveMap: this.cachedTextures.codeEditor,
-            emissive: isWorking ? 0x38bdf8 : 0x000000,
-            emissiveIntensity: isWorking ? 0.9 : 0.0,
+            emissive: isWorking ? PALETTE.accent.teal : 0x000000,
+            emissiveIntensity: isWorking ? 0.75 : 0.0,
             roughness: 0.2
         });
         const laptopScreen = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.42, 0.02), laptopScreenMat);
@@ -2228,8 +3035,8 @@ class Office3D {
         const monitorMat = new THREE.MeshStandardMaterial({
             map: this.cachedTextures.metricsDashboard,
             emissiveMap: this.cachedTextures.metricsDashboard,
-            emissive: isWorking ? 0x10b981 : 0x000000,
-            emissiveIntensity: isWorking ? 0.85 : 0.0,
+            emissive: isWorking ? PALETTE.accent.teal : 0x000000,
+            emissiveIntensity: isWorking ? 0.75 : 0.0,
             roughness: 0.2
         });
         const monitorScreen = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.04), monitorMat);
@@ -2244,8 +3051,8 @@ class Office3D {
         mug.position.set(-0.85, 1.16, 0.25);
         deskGroup.add(mug);
 
-        // Ergonomic Office Swivel Chair with Peach / Terracotta Fabric Cushions (Matches Reference Image)
-        const chairCushionColor = isLight ? 0xe29578 : (agent.avatar_color ? parseInt(agent.avatar_color.replace('#', '0x'), 16) : 0x38bdf8);
+        // Ergonomic Office Swivel Chair with Terracotta/Orange Fabric Cushions (T8: PALETTE.accentChair)
+        const chairCushionColor = isLight ? PALETTE.accentChair : (agent.avatar_color ? parseInt(agent.avatar_color.replace('#', '0x'), 16) : PALETTE.accent.teal);
         const chair = new THREE.Group();
         chair.position.set(0, 0, 0.95);
 
@@ -2274,302 +3081,13 @@ class Office3D {
         deskGroup.traverse(child => {
             if (child.isMesh) child.userData.parentAgentId = id;
         });
+        // T7: Tame metalness on desk
+        this.tameMetalness(deskGroup);
         this.officeGroup.add(deskGroup);
 
-        // 2. ARTICULATED AVATAR RIG (Moves across the office, sits on sofa with natural posture)
-        const avatarGroup = new THREE.Group();
-        avatarGroup.name = `AvatarGroup_${id}`;
-        avatarGroup.userData = { agentId: id, agentData: agent, isAvatar: true };
-
-        const bodyRoot = new THREE.Group();
-        bodyRoot.name = `BodyRoot_${id}`;
-        avatarGroup.add(bodyRoot);
-
-        // Materials
-        const hoodieMat = new THREE.MeshStandardMaterial({ color: chairColor, roughness: 0.5 });
-        const skinMat = new THREE.MeshStandardMaterial({ color: 0xfbcfe8, roughness: 0.35 });
-        const hairMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
-        const pantsMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
-        const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4 });
-        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
-
-        // A. Pelvis / Hips
-        const hips = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.16, 0.36), pantsMat);
-        hips.position.y = 0.58;
-        hips.castShadow = true;
-        bodyRoot.add(hips);
-
-        // B. Articulated Legs (Upper Leg / Thigh + Lower Leg / Calf + Shoes)
-        // Left Leg
-        const leftThighPivot = new THREE.Group();
-        leftThighPivot.name = `LeftThighPivot_${id}`;
-        leftThighPivot.position.set(-0.16, 0.56, 0.02);
-        bodyRoot.add(leftThighPivot);
-
-        const leftThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), pantsMat);
-        leftThigh.position.set(0, -0.14, 0);
-        leftThigh.castShadow = true;
-        leftThighPivot.add(leftThigh);
-
-        const leftKneePivot = new THREE.Group();
-        leftKneePivot.name = `LeftKneePivot_${id}`;
-        leftKneePivot.position.set(0, -0.28, 0);
-        leftThighPivot.add(leftKneePivot);
-
-        const leftCalf = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.24, 0.14), pantsMat);
-        leftCalf.position.set(0, -0.12, 0);
-        leftCalf.castShadow = true;
-        leftKneePivot.add(leftCalf);
-
-        // Left Sneaker with white sole
-        const leftShoeGroup = new THREE.Group();
-        leftShoeGroup.position.set(0, -0.24, 0.04);
-        const leftShoeUpper = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.06, 0.22), shoeMat);
-        leftShoeUpper.castShadow = true;
-        leftShoeGroup.add(leftShoeUpper);
-        const leftShoeSole = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.025, 0.23), whiteMat);
-        leftShoeSole.position.y = -0.04;
-        leftShoeGroup.add(leftShoeSole);
-        leftKneePivot.add(leftShoeGroup);
-
-        // Right Leg
-        const rightThighPivot = new THREE.Group();
-        rightThighPivot.name = `RightThighPivot_${id}`;
-        rightThighPivot.position.set(0.16, 0.56, 0.02);
-        bodyRoot.add(rightThighPivot);
-
-        const rightThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.28, 0.16), pantsMat);
-        rightThigh.position.set(0, -0.14, 0);
-        rightThigh.castShadow = true;
-        rightThighPivot.add(rightThigh);
-
-        const rightKneePivot = new THREE.Group();
-        rightKneePivot.name = `RightKneePivot_${id}`;
-        rightKneePivot.position.set(0, -0.28, 0);
-        rightThighPivot.add(rightKneePivot);
-
-        const rightCalf = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.24, 0.14), pantsMat);
-        rightCalf.position.set(0, -0.12, 0);
-        rightCalf.castShadow = true;
-        rightKneePivot.add(rightCalf);
-
-        // Right Sneaker with white sole
-        const rightShoeGroup = new THREE.Group();
-        rightShoeGroup.position.set(0, -0.24, 0.04);
-        const rightShoeUpper = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.06, 0.22), shoeMat);
-        rightShoeUpper.castShadow = true;
-        rightShoeGroup.add(rightShoeUpper);
-        const rightShoeSole = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.025, 0.23), whiteMat);
-        rightShoeSole.position.y = -0.04;
-        rightShoeGroup.add(rightShoeSole);
-        rightKneePivot.add(rightShoeGroup);
-
-        // C. Spine / Torso Pivot (Leans back comfortably when sitting on sofa)
-        const spinePivot = new THREE.Group();
-        spinePivot.name = `SpinePivot_${id}`;
-        spinePivot.position.set(0, 0.58, 0);
-        bodyRoot.add(spinePivot);
-
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.62, 0.40), hoodieMat);
-        torso.position.set(0, 0.31, 0);
-        torso.castShadow = true;
-        spinePivot.add(torso);
-
-        // Hoodie Kangaroo Pocket
-        const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.18, 0.06), hoodieMat);
-        pocket.position.set(0, 0.18, 0.21);
-        spinePivot.add(pocket);
-
-        // Chest ID Badge
-        const idBadge = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12, 0.16, 0.02),
-            new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 })
-        );
-        idBadge.position.set(-0.16, 0.38, 0.21);
-        spinePivot.add(idBadge);
-
-        // D. Head Pivot
-        const headPivot = new THREE.Group();
-        headPivot.name = `HeadPivot_${id}`;
-        headPivot.position.set(0, 0.62, 0);
-        spinePivot.add(headPivot);
-
-        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.1, 12), skinMat);
-        neck.position.y = 0.05;
-        headPivot.add(neck);
-
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), skinMat);
-        head.position.y = 0.32;
-        head.castShadow = true;
-        head.name = `HeadMesh_${id}`;
-        headPivot.add(head);
-
-        // Expressive Face / Visor
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
-        const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.02), eyeMat);
-        eyeL.position.set(-0.12, 0.34, 0.24);
-        headPivot.add(eyeL);
-
-        const eyeR = eyeL.clone();
-        eyeR.position.x = 0.12;
-        headPivot.add(eyeR);
-
-        // Hair / Cap
-        const hair = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.18, 0.50), hairMat);
-        hair.position.set(0, 0.52, -0.02);
-        headPivot.add(hair);
-
-        // Modern Headset with Glowing RGB Accents
-        const headsetBand = new THREE.Mesh(
-            new THREE.TorusGeometry(0.27, 0.035, 8, 24, Math.PI),
-            new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8, roughness: 0.3 })
-        );
-        headsetBand.rotation.z = Math.PI;
-        headsetBand.position.set(0, 0.52, 0);
-        headPivot.add(headsetBand);
-
-        const earL = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.09, 0.09, 0.06, 16),
-            new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7 })
-        );
-        earL.rotation.z = Math.PI / 2;
-        earL.position.set(-0.25, 0.34, 0);
-        headPivot.add(earL);
-
-        const rgbMat = new THREE.MeshBasicMaterial({ 
-            color: agent.status === 'KERJA' ? 0x10b981 : 0x06b6d4 
-        });
-        const rgbRingL = new THREE.Mesh(new THREE.RingGeometry(0.04, 0.07, 16), rgbMat);
-        rgbRingL.rotation.y = -Math.PI / 2;
-        rgbRingL.position.set(-0.285, 0.34, 0);
-        rgbRingL.name = `RgbRingL_${id}`;
-        headPivot.add(rgbRingL);
-
-        const earR = earL.clone();
-        earR.position.x = 0.25;
-        headPivot.add(earR);
-
-        const rgbRingR = rgbRingL.clone();
-        rgbRingR.rotation.y = Math.PI / 2;
-        rgbRingR.position.x = 0.285;
-        rgbRingR.name = `RgbRingR_${id}`;
-        headPivot.add(rgbRingR);
-
-        // E. Articulated Arms (Upper Arm + Forearm + Hands + Beverage in Lounge)
-        // Left Arm
-        const leftArmPivot = new THREE.Group();
-        leftArmPivot.name = `LeftArmPivot_${id}`;
-        leftArmPivot.position.set(-0.35, 0.56, 0);
-        spinePivot.add(leftArmPivot);
-
-        const leftUpperArm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.26, 0.13), hoodieMat);
-        leftUpperArm.position.set(0, -0.13, 0);
-        leftUpperArm.castShadow = true;
-        leftArmPivot.add(leftUpperArm);
-
-        const leftElbowPivot = new THREE.Group();
-        leftElbowPivot.name = `LeftElbowPivot_${id}`;
-        leftElbowPivot.position.set(0, -0.26, 0);
-        leftArmPivot.add(leftElbowPivot);
-
-        const leftForearm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.12), hoodieMat);
-        leftForearm.position.set(0, -0.11, 0);
-        leftForearm.castShadow = true;
-        leftElbowPivot.add(leftForearm);
-
-        const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.10), skinMat);
-        leftHand.position.set(0, -0.24, 0);
-        leftElbowPivot.add(leftHand);
-
-        // Right Arm
-        const rightArmPivot = new THREE.Group();
-        rightArmPivot.name = `RightArmPivot_${id}`;
-        rightArmPivot.position.set(0.35, 0.56, 0);
-        spinePivot.add(rightArmPivot);
-
-        const rightUpperArm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.26, 0.13), hoodieMat);
-        rightUpperArm.position.set(0, -0.13, 0);
-        rightUpperArm.castShadow = true;
-        rightArmPivot.add(rightUpperArm);
-
-        const rightElbowPivot = new THREE.Group();
-        rightElbowPivot.name = `RightElbowPivot_${id}`;
-        rightElbowPivot.position.set(0, -0.26, 0);
-        rightArmPivot.add(rightElbowPivot);
-
-        const rightForearm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.12), hoodieMat);
-        rightForearm.position.set(0, -0.11, 0);
-        rightForearm.castShadow = true;
-        rightElbowPivot.add(rightForearm);
-
-        const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.10), skinMat);
-        rightHand.position.set(0, -0.24, 0);
-        rightElbowPivot.add(rightHand);
-
-        // Relaxed Coffee Cup in Right Hand (Active when resting in lounge)
-        const coffeeCupGroup = new THREE.Group();
-        coffeeCupGroup.name = `CoffeeCup_${id}`;
-        coffeeCupGroup.position.set(0, -0.26, 0.08);
-
-        const cupMesh = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.06, 0.05, 0.12, 12),
-            new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3 })
-        );
-        cupMesh.castShadow = true;
-        coffeeCupGroup.add(cupMesh);
-
-        const cupLiquid = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.055, 0.055, 0.02, 12),
-            new THREE.MeshStandardMaterial({ color: 0x3f2d1d, roughness: 0.2 })
-        );
-        cupLiquid.position.y = 0.05;
-        coffeeCupGroup.add(cupLiquid);
-
-        // Steaming coffee vapor
-        const steam = new THREE.Mesh(
-            new THREE.ConeGeometry(0.04, 0.12, 8),
-            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 })
-        );
-        steam.position.y = 0.12;
-        coffeeCupGroup.add(steam);
-
-        coffeeCupGroup.visible = false;
-        rightElbowPivot.add(coffeeCupGroup);
-
-        // F. Overhead Status Orb & Badge
-        const statusOrb = new THREE.Mesh(
-            new THREE.SphereGeometry(0.12, 16, 16),
-            new THREE.MeshBasicMaterial({
-                color: agent.status === 'KERJA' ? 0x10b981 : (agent.status === 'IDLE' ? 0xf59e0b : 0x64748b)
-            })
-        );
-        statusOrb.position.set(0, 2.35, 0);
-        statusOrb.name = `StatusOrb_${id}`;
-        avatarGroup.add(statusOrb);
-
-        const badgeSprite = this.createTextBadgeSprite(agent.name, agent.role, agent.status);
-        badgeSprite.position.set(0, 2.7, 0);
-        badgeSprite.name = `BadgeSprite_${id}`;
-        avatarGroup.add(badgeSprite);
-
-        // Floor Selection Ring
-        const ringGeo = new THREE.RingGeometry(1.4, 1.55, 32);
-        const ringMat = new THREE.MeshBasicMaterial({
-            color: isLight ? 0x2563eb : 0x38bdf8,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.85
-        });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.03;
-        ring.visible = false;
-        ring.name = `SelectRing_${id}`;
-        avatarGroup.add(ring);
-
-        avatarGroup.traverse(child => {
-            if (child.isMesh) child.userData.parentAgentId = id;
-        });
+                // 2. AVATAR (rig membulat, pivot bernama sama dengan versi lama)
+        const avatarGroup = this.buildAvatarRig(id, agent);
+        this.tameMetalness?.(avatarGroup);
         this.officeGroup.add(avatarGroup);
 
         // 3. INITIAL POSE & LOCOMOTION STATE
@@ -2753,31 +3271,28 @@ class Office3D {
         agentUnit.deskGroup.position.set(deskX, 0, deskZ);
         agentUnit.deskGroup.rotation.y = rotY;
 
-        // Update Screen glow
+        // Update Screen glow (T10: PALETTE.accent.teal)
+        const isWorking = agent.status === 'KERJA';
+        const isIdle = agent.status === 'IDLE' || agent.status === 'PAUSED';
+        const statusAccentHex = isWorking ? PALETTE.accent.teal : (isIdle ? PALETTE.accent.amber : PALETTE.accent.coral);
+
         const screen = agentUnit.deskGroup.getObjectByName(`Screen_${id}`);
         if (screen) {
-            screen.material.emissive.setHex(agent.status === 'KERJA' ? 0x38bdf8 : 0x000000);
-            screen.material.emissiveIntensity = agent.status === 'KERJA' ? 0.9 : 0.0;
+            screen.material.emissive.setHex(isWorking ? PALETTE.accent.teal : 0x000000);
+            screen.material.emissiveIntensity = isWorking ? 0.75 : 0.0;
         }
 
         const monitor = agentUnit.deskGroup.getObjectByName(`Monitor_${id}`);
         if (monitor) {
-            monitor.material.emissive.setHex(agent.status === 'KERJA' ? 0x10b981 : 0x000000);
-            monitor.material.emissiveIntensity = agent.status === 'KERJA' ? 0.85 : 0.0;
-        }
-
-        // Update status orb color
-        const orb = agentUnit.avatarGroup.getObjectByName(`StatusOrb_${id}`);
-        if (orb) {
-            orb.material.color.setHex(agent.status === 'KERJA' ? 0x10b981 : (agent.status === 'IDLE' ? 0xf59e0b : 0x64748b));
+            monitor.material.emissive.setHex(isWorking ? PALETTE.accent.teal : 0x000000);
+            monitor.material.emissiveIntensity = isWorking ? 0.75 : 0.0;
         }
 
         // Update RGB headset ring
         const rgbL = agentUnit.avatarGroup.getObjectByName(`RgbRingL_${id}`);
         const rgbR = agentUnit.avatarGroup.getObjectByName(`RgbRingR_${id}`);
-        const ringCol = agent.status === 'KERJA' ? 0x10b981 : (agent.status === 'IDLE' ? 0xf59e0b : 0x64748b);
-        if (rgbL) rgbL.material.color.setHex(ringCol);
-        if (rgbR) rgbR.material.color.setHex(ringCol);
+        if (rgbL) rgbL.material.color.setHex(statusAccentHex);
+        if (rgbR) rgbR.material.color.setHex(statusAccentHex);
 
         // Update text badge sprite
         const oldSprite = agentUnit.avatarGroup.getObjectByName(`BadgeSprite_${id}`);
@@ -2787,7 +3302,7 @@ class Office3D {
             oldSprite.material.dispose();
 
             const newSprite = this.createTextBadgeSprite(agent.name, agent.role, agent.status);
-            newSprite.position.set(0, 2.7, 0);
+            newSprite.position.set(0, 2.35, 0);
             newSprite.name = `BadgeSprite_${id}`;
             agentUnit.avatarGroup.add(newSprite);
         }
@@ -2953,8 +3468,9 @@ class Office3D {
         const isLight = this.currentTheme === 'light';
 
         const isWorking = status === 'KERJA';
-        const isIdle = status === 'IDLE';
-        const statusColor = isWorking ? '#10b981' : (isIdle ? '#f59e0b' : '#64748b');
+        const isIdle = status === 'IDLE' || status === 'PAUSED';
+        // T10: Teal (#3FA796) for KERJA, Amber (#E0A84B) for IDLE/PAUSED, Coral (#E07A5F) for error
+        const statusColor = isWorking ? '#3fa796' : (isIdle ? '#e0a84b' : '#e07a5f');
 
         // Extract 1 to 3 uppercase initials (e.g. KA, RH, BPP, M, T, BE, KL, Y, BS, AB)
         const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -3013,6 +3529,8 @@ class Office3D {
         ctx.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
         texture.minFilter = THREE.LinearFilter;
 
         const spriteMat = new THREE.SpriteMaterial({
@@ -3248,16 +3766,9 @@ class Office3D {
             });
         }
 
-        // Cute Shiba Inu Mascot tail wagging & breathing
-        if (this.shibaGroup) {
-            const tail = this.shibaGroup.getObjectByName('ShibaTailPivot');
-            if (tail) {
-                tail.rotation.y = Math.sin(elapsedTime * 6.5) * 0.35;
-            }
-            const head = this.shibaGroup.getObjectByName('ShibaHeadPivot');
-            if (head) {
-                head.rotation.z = Math.sin(elapsedTime * 1.8) * 0.08;
-            }
+                // Cute Office Cat Mascot Dynamic Roaming Locomotion & Animation
+        if (this.catGroup && this.catState) {
+            this.updateCatLocomotion(delta, elapsedTime);
         }
 
         // Dynamic Furniture Pop-in Animation
@@ -3297,6 +3808,14 @@ class Office3D {
             // Floating status orb hover
             if (orb) {
                 orb.position.y = 2.35 + Math.sin(elapsedTime * 3 + id) * 0.05;
+            }
+
+            const eyeL = avatarGroup.getObjectByName(`EyeL_${id}`);
+            const eyeR = avatarGroup.getObjectByName(`EyeR_${id}`);
+            if (eyeL && eyeR) {
+                const blink = ((elapsedTime * 0.5 + id * 1.7) % 4) > 3.88 ? 0.1 : 1;
+                eyeL.scale.y = blink;
+                eyeR.scale.y = blink;
             }
 
             // Selection spotlight & camera tracking following selected agent
@@ -3428,4 +3947,30 @@ class Office3D {
 
         this.renderer.render(this.scene, this.camera);
     }
+    /**
+     * Traverses the scene and audits materials outside safe luminance range (0.08 to 0.90)
+     * (Snippet 6.3 in task-improve-office.md)
+     */
+    auditMaterials(min = 0.08, max = 0.90) {
+        const flagged = [];
+        if (!this.scene) return flagged;
+        this.scene.traverse((o) => {
+            if (!o.isMesh || !o.material || !o.material.color) return;
+            const L = relLuminance(o.material.color);
+            if (L < min || L > max) {
+                flagged.push({
+                    name: o.name || o.uuid,
+                    colorHex: '#' + o.material.color.getHexString(),
+                    luminance: +L.toFixed(3),
+                    issue: L < min ? 'TERLALU GELAP (< 0.08)' : 'TERLALU TERANG (> 0.90)'
+                });
+            }
+        });
+        if (typeof console !== 'undefined' && console.table) {
+            console.log(`[Virtual Office QA] Material Luminance Audit (Safe: ${min} - ${max}):`);
+            console.table(flagged);
+        }
+        return flagged;
+    }
+
 }

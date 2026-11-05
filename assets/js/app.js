@@ -1190,6 +1190,10 @@ class AppController {
         document.getElementById('insp-avatar').textContent = this.getAgentInitials(agent.name);
 
         document.getElementById('insp-status-select').value = agent.status;
+        const genderSelect = document.getElementById('insp-gender-select');
+        if (genderSelect) {
+            genderSelect.value = agent.gender || 'male';
+        }
         document.getElementById('insp-model').textContent = agent.model;
         document.getElementById('insp-temp').textContent = agent.temperature;
         document.getElementById('insp-tokens').textContent = Number(agent.token_usage).toLocaleString();
