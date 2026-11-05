@@ -11,6 +11,9 @@ yarn-debug.log*
 .DS_Store
 Thumbs.db
 
+#config db
+api/db.php
+
 # IDE and editors
 .idea/
 .vscode/
