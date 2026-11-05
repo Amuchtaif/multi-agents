@@ -29,7 +29,7 @@ class Office3D {
         // Camera target for smooth tweening
         this.targetLookAt = new THREE.Vector3(0, 0, 0);
         this.currentLookAt = new THREE.Vector3(0, 0, 0);
-        this.defaultCameraPos = new THREE.Vector3(26, 26, 26);
+        this.defaultCameraPos = new THREE.Vector3(3.5, 25, 23);
 
         // Dynamic Rest Spots System
         this.restSpots = [];
@@ -370,6 +370,11 @@ class Office3D {
         this.cachedTextures.codeEditor = this.generateCodeEditorTexture();
         this.cachedTextures.metricsDashboard = this.generateMetricsDashboardTexture();
         this.cachedTextures.presentationScreen = this.generatePresentationScreenTexture();
+        this.cachedTextures.decalLeadership = this.generateFloorDecalTexture('LEADERSHIP');
+        this.cachedTextures.decalMarketing = this.generateFloorDecalTexture('MARKETING & BUSINESS');
+        this.cachedTextures.decalLounge = this.generateFloorDecalTexture('LOUNGE');
+        this.cachedTextures.workBoard = this.generateWorkBoardTexture();
+        this.cachedTextures.posterGreatWork = this.generateMotivationalPosterTexture();
     }
 
     /**
@@ -469,6 +474,152 @@ class Office3D {
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.repeat.set(4, 4);
+        return texture;
+    }
+
+    /**
+     * Generates modern architectural floor typography decals (e.g. LEADERSHIP, MARKETING & BUSINESS)
+     */
+    generateFloorDecalTexture(text) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 1024, 256);
+
+        // Modern wide-tracking architectural sans-serif typography
+        ctx.font = '900 64px "Inter", "Segoe UI", Roboto, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '14px';
+
+        // Subtle dark charcoal tone matching the reference image floor print
+        ctx.fillStyle = this.currentTheme === 'light' ? 'rgba(55, 50, 45, 0.65)' : 'rgba(56, 189, 248, 0.75)';
+        ctx.fillText(text, 512, 128);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        return texture;
+    }
+
+    /**
+     * Generates rolling whiteboard texture ("WORK BOARD") with colorful sticky notes and status checklist
+     */
+    generateWorkBoardTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 340;
+        const ctx = canvas.getContext('2d');
+
+        // Whiteboard surface with subtle clean grid
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 512, 340);
+
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+        ctx.lineWidth = 1;
+        for (let x = 20; x < 512; x += 30) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 340); ctx.stroke();
+        }
+        for (let y = 20; y < 340; y += 30) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke();
+        }
+
+        // Header: WORK BOARD
+        ctx.font = '900 24px "Inter", sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText('WORK BOARD', 24, 38);
+
+        ctx.font = '600 12px "Inter", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('Sprint Q4 • Active Roadmap', 24, 56);
+
+        // Colorful sticky notes (matching reference image)
+        const notes = [
+            { col: '#bfdbfe', border: '#3b82f6', t: 'Deploy v2.0 ke staging cluster' },
+            { col: '#fed7aa', border: '#f97316', t: 'Optimize Three.js 60 FPS' },
+            { col: '#bbf7d0', border: '#22c55e', t: 'Automasi Playwright 100%' },
+            { col: '#fbcfe8', border: '#ec4899', t: 'Fix memory leak texture disposal' },
+            { col: '#ddd6fe', border: '#8b5cf6', t: 'Partner dashboard sync' }
+        ];
+
+        notes.forEach((n, i) => {
+            const ny = 74 + i * 50;
+            ctx.fillStyle = n.col;
+            ctx.fillRect(24, ny, 280, 42);
+            ctx.strokeStyle = n.border;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(24, ny, 280, 42);
+
+            ctx.fillStyle = n.border;
+            ctx.fillRect(24, ny, 6, 42);
+
+            ctx.font = 'bold 12px "Inter", sans-serif';
+            ctx.fillStyle = '#1e293b';
+            ctx.fillText(n.t, 38, ny + 25);
+        });
+
+        // Checklist rows on right side
+        ctx.font = 'bold 14px "Inter", sans-serif';
+        ctx.fillStyle = '#334155';
+        ctx.fillText('Status Tracking', 340, 78);
+
+        for (let r = 0; r < 5; r++) {
+            const cy = 104 + r * 45;
+            ctx.strokeStyle = r < 3 ? '#22c55e' : '#cbd5e1';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(340, cy, 18, 18);
+            if (r < 3) {
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
+                ctx.arc(349, cy + 9, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = '#64748b';
+            ctx.font = '11px monospace';
+            ctx.fillText(r < 3 ? '[DONE]' : '[IN PROGRESS]', 368, cy + 14);
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        return texture;
+    }
+
+    /**
+     * Generates minimalist art poster on easel ("Good people build great work.")
+     */
+    generateMotivationalPosterTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 380;
+        canvas.height = 500;
+        const ctx = canvas.getContext('2d');
+
+        // Pure white minimalist paper
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 380, 500);
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(16, 16, 348, 468);
+
+        // Minimalist bold typography exactly matching reference image
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 48px "Inter", "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Good', 42, 140);
+        ctx.fillText('people', 42, 195);
+        ctx.fillText('build great', 42, 250);
+        ctx.fillText('work.', 42, 305);
+
+        // Accent coral line
+        ctx.fillStyle = '#e07a5f';
+        ctx.fillRect(42, 335, 60, 5);
+
+        ctx.font = '600 13px "Inter", sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('VIRTUAL OFFICE HQ • STUDIO', 42, 420);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
         return texture;
     }
 
@@ -682,21 +833,21 @@ class Office3D {
     setupLighting() {
         const isLight = this.currentTheme === 'light';
 
-        // 1. Hemisphere Light (Soft Sky & Floor Bounce)
+        // 1. Hemisphere Light (Soft Warm Sky & Scandinavian Birch Floor Bounce)
         this.hemiLight = new THREE.HemisphereLight(
-            isLight ? 0xfffbeb : 0x38bdf8,
-            isLight ? 0xa89f91 : 0x090d16,
-            isLight ? 0.32 : 0.40
+            isLight ? 0xfffdf7 : 0x38bdf8,
+            isLight ? 0xe2d7c8 : 0x090d16,
+            isLight ? 0.45 : 0.40
         );
         this.scene.add(this.hemiLight);
 
-        // 2. Ambient Light (Balanced fill light to allow rich crisp shadows in light theme)
-        this.ambientLight = new THREE.AmbientLight(isLight ? 0xf8fafc : 0xdbeafe, isLight ? 0.38 : 0.55);
+        // 2. Ambient Light (Soft Daylight Fill)
+        this.ambientLight = new THREE.AmbientLight(isLight ? 0xfffdfa : 0xdbeafe, isLight ? 0.50 : 0.55);
         this.scene.add(this.ambientLight);
 
-        // 3. Main Directional Light (Crisp architectural sunlight with distinct contact shadows)
-        this.dirLight = new THREE.DirectionalLight(isLight ? 0xfffaf0 : 0xffffff, isLight ? 1.30 : 0.95);
-        this.dirLight.position.set(26, 38, 26);
+        // 3. Main Directional Light (Warm Scandinavian Sunlight casting delicate contact shadows)
+        this.dirLight = new THREE.DirectionalLight(isLight ? 0xfffaf2 : 0xffffff, isLight ? 1.45 : 0.95);
+        this.dirLight.position.set(22, 36, 24);
         this.dirLight.castShadow = true;
         this.dirLight.shadow.mapSize.width = 2048;
         this.dirLight.shadow.mapSize.height = 2048;
@@ -752,12 +903,14 @@ class Office3D {
         floor.receiveShadow = true;
         this.officeGroup.add(floor);
 
-        // Department Carpets (Dev, QA & Design) - Centered symmetrically around (±4.5, 0)
-        this.carpetLeft = this.createCarpet(-4.5, 0, 7.5, 8.0, isLight ? 0x2563eb : 0x1e3a8a, isLight ? 0.52 : 0.25);
-        this.carpetRight = this.createCarpet(4.5, 0, 7.5, 8.0, isLight ? 0x7c3aed : 0x312e81, isLight ? 0.52 : 0.25);
+        // Architectural Floor Typography Decals (Directly on Walkway floor like Reference Image)
+        this.buildFloorDecals();
 
-        // Dedicated Lounge & Coffee Area Carpet - Rich terracotta warm amber
-        this.carpetLounge = this.createCarpet(3.8, 7.2, 8.0, 5.8, isLight ? 0xc2410c : 0x7c2d12, isLight ? 0.55 : 0.3);
+        // Overhead White Architectural Beams & Forest Green Pendant Dome Lamps
+        this.buildOverheadBeamsAndPendants();
+
+        // Center Low Planter Credenza Divider (Dividing bottom workstation zones)
+        this.buildCenterPlanterCredenza();
 
         // 2. Cutaway Architectural Walls - Symmetrical High-Contrast Slate
         this.wallMat = new THREE.MeshStandardMaterial({
@@ -866,6 +1019,9 @@ class Office3D {
         this.createPottedPlant(10.5, -3.5);
         this.createPottedPlant(-1.5, -9.5);
         this.createPottedPlant(-1.5, 6.5);
+
+        // 7. Cute Shiba Inu Dog Mascot (Like in Reference Image)
+        this.buildShibaInuMascot();
     }
 
     createCarpet(x, z, width, depth, colorHex, opacity = 0.4) {
@@ -883,6 +1039,223 @@ class Office3D {
         carpet.receiveShadow = true;
         this.officeGroup.add(carpet);
         return carpet;
+    }
+
+    buildFloorDecals() {
+        const isLight = this.currentTheme === 'light';
+
+        // Leadership Zone Decal (Left Walkway Section)
+        const decalMatL = new THREE.MeshBasicMaterial({
+            map: this.cachedTextures.decalLeadership,
+            transparent: true,
+            opacity: isLight ? 0.82 : 0.9,
+            depthWrite: false
+        });
+        const decalL = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 1.62), decalMatL);
+        decalL.rotation.x = -Math.PI / 2;
+        decalL.position.set(-4.5, 0.015, -0.6);
+        this.officeGroup.add(decalL);
+
+        // Marketing & Business Zone Decal (Right Walkway Section)
+        const decalMatR = new THREE.MeshBasicMaterial({
+            map: this.cachedTextures.decalMarketing,
+            transparent: true,
+            opacity: isLight ? 0.82 : 0.9,
+            depthWrite: false
+        });
+        const decalR = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.87), decalMatR);
+        decalR.rotation.x = -Math.PI / 2;
+        decalR.position.set(4.5, 0.015, -0.6);
+        this.officeGroup.add(decalR);
+    }
+
+    buildOverheadBeamsAndPendants() {
+        const isLight = this.currentTheme === 'light';
+
+        // 1. Sleek Structural Horizontal Beams (spanning X = -12 to +12 at Y = 4.1)
+        const beamMat = new THREE.MeshStandardMaterial({
+            color: isLight ? 0xffffff : 0x1e293b,
+            roughness: 0.3,
+            metalness: 0.1
+        });
+        const beamPositionsZ = [-3.8, 3.8];
+
+        beamPositionsZ.forEach(bz => {
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.24, 0.24), beamMat);
+            beam.position.set(0, 4.1, bz);
+            beam.castShadow = true;
+            this.officeGroup.add(beam);
+
+            // Subtle linear LED strip under beam
+            const ledStrip = new THREE.Mesh(
+                new THREE.BoxGeometry(24.0, 0.02, 0.06),
+                new THREE.MeshBasicMaterial({ color: isLight ? 0xfffbeb : 0x38bdf8 })
+            );
+            ledStrip.position.set(0, 3.97, bz);
+            this.officeGroup.add(ledStrip);
+        });
+
+        // 2. Iconic Forest Green Pendant Dome Lamps directly over workstation desks
+        const lampX = [-4.5, -1.5, 1.5, 4.5];
+        const lampZ = [-2.5, 2.5];
+
+        const domeMat = new THREE.MeshStandardMaterial({
+            color: isLight ? 0x365744 : 0x10b981,
+            roughness: 0.45,
+            metalness: 0.2
+        });
+        const cordMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e });
+        const brassMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.8, roughness: 0.2 });
+
+        lampX.forEach(lx => {
+            lampZ.forEach(lz => {
+                const lampGroup = new THREE.Group();
+                lampGroup.position.set(lx, 0, lz);
+
+                // Thin black cord hanging from ceiling / beam (Y: 4.1 down to 2.5)
+                const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1.6, 8), cordMat);
+                cord.position.y = 3.3;
+                lampGroup.add(cord);
+
+                // Brass fitting ring
+                const fitting = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.08, 16), brassMat);
+                fitting.position.y = 2.52;
+                lampGroup.add(fitting);
+
+                // Forest Green Dome Shade
+                const dome = new THREE.Mesh(new THREE.SphereGeometry(0.38, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+                dome.position.y = 2.45;
+                dome.castShadow = true;
+                lampGroup.add(dome);
+
+                // Subtle warm downlight pool on the desk
+                const downlight = new THREE.PointLight(0xfff7ed, isLight ? 0.45 : 0.8, 5.0, 1.5);
+                downlight.position.y = 2.35;
+                lampGroup.add(downlight);
+
+                this.officeGroup.add(lampGroup);
+            });
+        });
+    }
+
+    buildCenterPlanterCredenza() {
+        const isLight = this.currentTheme === 'light';
+        const planterGroup = new THREE.Group();
+        planterGroup.position.set(0, 0, 3.0);
+
+        // Low Blonde Scandinavian Wood Credenza
+        const boxMat = new THREE.MeshStandardMaterial({
+            color: isLight ? 0xe2d6c3 : 0x334155,
+            roughness: 0.4
+        });
+        const planterBox = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.72, 3.8), boxMat);
+        planterBox.position.y = 0.36;
+        planterBox.castShadow = true;
+        planterBox.receiveShadow = true;
+        planterGroup.add(planterBox);
+
+        // 3 Potted Succulents & Bonsai along the top
+        const potMat = new THREE.MeshStandardMaterial({ color: isLight ? 0xffffff : 0x475569, roughness: 0.3 });
+        const plantZ = [-1.2, 0, 1.2];
+        plantZ.forEach((pz, i) => {
+            const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.14, 0.22, 16), potMat);
+            pot.position.set(0, 0.83, pz);
+            pot.castShadow = true;
+            planterGroup.add(pot);
+
+            // Soil
+            const soil = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.16, 0.16, 0.04, 16),
+                new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.9 })
+            );
+            soil.position.set(0, 0.93, pz);
+            planterGroup.add(soil);
+
+            // Plant greenery
+            const plantMat = new THREE.MeshStandardMaterial({
+                color: i === 1 ? 0x15803d : 0x16a34a,
+                roughness: 0.6
+            });
+            const leaves = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 1), plantMat);
+            leaves.position.set(0, 1.10, pz);
+            leaves.scale.set(1.0, 1.35, 1.0);
+            leaves.castShadow = true;
+            planterGroup.add(leaves);
+        });
+
+        this.officeGroup.add(planterGroup);
+    }
+
+    buildShibaInuMascot() {
+        const shibaGroup = new THREE.Group();
+        shibaGroup.name = 'OfficeMascotShiba';
+        shibaGroup.position.set(3.2, 0, 1.8);
+        shibaGroup.rotation.y = -Math.PI / 4;
+
+        const coatMat = new THREE.MeshStandardMaterial({ color: 0xe0a96d, roughness: 0.7 });
+        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xfffcf7, roughness: 0.7 });
+        const noseMat = new THREE.MeshBasicMaterial({ color: 0x1e1e1e });
+
+        // Body (lying / resting playfully)
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 0.52), coatMat);
+        body.position.y = 0.20;
+        body.castShadow = true;
+        shibaGroup.add(body);
+
+        // White belly patch
+        const belly = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.42), whiteMat);
+        belly.position.set(0, 0.10, 0.04);
+        shibaGroup.add(belly);
+
+        // Head Pivot
+        const headPivot = new THREE.Group();
+        headPivot.name = 'ShibaHeadPivot';
+        headPivot.position.set(0, 0.32, 0.26);
+        shibaGroup.add(headPivot);
+
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.24, 0.24), coatMat);
+        head.position.set(0, 0.08, 0);
+        head.castShadow = true;
+        headPivot.add(head);
+
+        // White muzzle
+        const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.10, 0.12), whiteMat);
+        muzzle.position.set(0, 0.04, 0.15);
+        headPivot.add(muzzle);
+
+        // Nose
+        const nose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), noseMat);
+        nose.position.set(0, 0.07, 0.21);
+        headPivot.add(nose);
+
+        // Cute pointy ears
+        [-0.09, 0.09].forEach(ex => {
+            const ear = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.09, 4), coatMat);
+            ear.position.set(ex, 0.22, -0.02);
+            ear.rotation.y = Math.PI / 4;
+            headPivot.add(ear);
+        });
+
+        // Curled tail
+        const tailPivot = new THREE.Group();
+        tailPivot.name = 'ShibaTailPivot';
+        tailPivot.position.set(0, 0.28, -0.25);
+        shibaGroup.add(tailPivot);
+
+        const tail = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.035, 8, 16, Math.PI * 1.4), coatMat);
+        tail.rotation.x = Math.PI / 2;
+        tail.position.y = 0.06;
+        tailPivot.add(tail);
+
+        // Paws
+        [[-0.14, 0.18], [0.14, 0.18], [-0.14, -0.16], [0.14, -0.16]].forEach(([px, pz]) => {
+            const paw = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.10, 0.14), whiteMat);
+            paw.position.set(px, 0.05, pz);
+            shibaGroup.add(paw);
+        });
+
+        this.officeGroup.add(shibaGroup);
+        this.shibaGroup = shibaGroup;
     }
 
     buildMeetingRoom(x, z) {
@@ -1138,6 +1511,76 @@ class Office3D {
         );
         trophy.position.set(11.0, 1.5, 8.6);
         this.officeGroup.add(trophy);
+
+        // 4. Rolling Whiteboard ("WORK BOARD" with sticky notes - Matches Reference Image)
+        const wbGroup = new THREE.Group();
+        wbGroup.position.set(0.2, 0, 5.2);
+        wbGroup.rotation.y = -0.18; // Angled nicely towards central view
+
+        const wbMat = new THREE.MeshStandardMaterial({
+            map: this.cachedTextures.workBoard,
+            roughness: 0.3
+        });
+        const board = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.35, 0.04), wbMat);
+        board.position.y = 1.55;
+        board.castShadow = true;
+        wbGroup.add(board);
+
+        // Black metal frame & stand on casters
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8 });
+        const leftPole = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.75, 0.05), frameMat);
+        leftPole.position.set(-1.08, 1.05, 0);
+        wbGroup.add(leftPole);
+
+        const rightPole = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.75, 0.05), frameMat);
+        rightPole.position.set(1.08, 1.05, 0);
+        wbGroup.add(rightPole);
+
+        // Cross feet with wheels
+        [-1.08, 1.08].forEach(fx => {
+            const foot = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.65), frameMat);
+            foot.position.set(fx, 0.05, 0);
+            wbGroup.add(foot);
+        });
+
+        this.officeGroup.add(wbGroup);
+
+        // 5. Minimalist Framed Poster on Tripod Easel ("Good people build great work.")
+        const posterGroup = new THREE.Group();
+        posterGroup.position.set(-2.6, 0, 8.2);
+        posterGroup.rotation.y = 0.35; // Angled towards central view
+
+        const easelMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.5 });
+        const easelLegL = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.3, 8), easelMat);
+        easelLegL.position.set(-0.42, 1.15, -0.05);
+        easelLegL.rotation.z = -0.18;
+        posterGroup.add(easelLegL);
+
+        const easelLegR = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.3, 8), easelMat);
+        easelLegR.position.set(0.42, 1.15, -0.05);
+        easelLegR.rotation.z = 0.18;
+        posterGroup.add(easelLegR);
+
+        const easelLegB = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 2.2, 8), easelMat);
+        easelLegB.position.set(0, 1.1, -0.38);
+        easelLegB.rotation.x = -0.30;
+        posterGroup.add(easelLegB);
+
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.08), easelMat);
+        bar.position.set(0, 1.05, 0.08);
+        posterGroup.add(bar);
+
+        const posterMat = new THREE.MeshStandardMaterial({
+            map: this.cachedTextures.posterGreatWork,
+            roughness: 0.35
+        });
+        const posterFrame = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.5, 0.04), posterMat);
+        posterFrame.position.set(0, 1.72, 0.06);
+        posterFrame.rotation.x = -0.12;
+        posterFrame.castShadow = true;
+        posterGroup.add(posterFrame);
+
+        this.officeGroup.add(posterGroup);
     }
 
     buildServerRacks(x, z) {
@@ -1351,7 +1794,8 @@ class Office3D {
 
         // 1. Main 3-Seater Sofa (At z = 8.85, facing south towards coffee table at z = 7.2)
         // Generous 67.5cm clearance to coffee table (Zero leg clipping, realistic seating space)
-        const mainSofaColor = isLight ? 0x0284c7 : 0x0369a1;
+        // Scandinavian Mint / Sage Green Sofa (Matches Reference Image)
+        const mainSofaColor = isLight ? 0xc2d5c3 : 0x064e3b;
         const mainSofa = this.createSofaMesh(2.8, 1.05, mainSofaColor, isLight);
         mainSofa.position.set(3.8, 0, 8.85);
         mainSofa.rotation.y = Math.PI; // Facing -Z (towards coffee table)
@@ -1383,7 +1827,7 @@ class Office3D {
 
         // 2. Kursi Sofa Single Kiri (Armchair 1 - facing coffee table from left)
         // Generous 87.5cm clearance to coffee table
-        const armchairColor1 = isLight ? 0x059669 : 0x0f766e;
+        const armchairColor1 = isLight ? 0x4d8c6b : 0x047857; // Forest green armchair
         const leftArmchair = this.createSofaMesh(1.15, 1.05, armchairColor1, isLight);
         leftArmchair.position.set(1.55, 0, 7.2);
         leftArmchair.rotation.y = Math.PI / 2; // Facing +X (towards coffee table)
@@ -1402,7 +1846,7 @@ class Office3D {
 
         // 3. Kursi Sofa Single Kanan (Armchair 2 - facing coffee table from right)
         // 87.5cm clearance to table, and 72.5cm walkway clearance to coffee counter
-        const armchairColor2 = isLight ? 0xd97706 : 0xb45309;
+        const armchairColor2 = isLight ? 0xe29578 : 0xb45309; // Peach / terracotta armchair
         const rightArmchair = this.createSofaMesh(1.15, 1.05, armchairColor2, isLight);
         rightArmchair.position.set(6.05, 0, 7.2);
         rightArmchair.rotation.y = -Math.PI / 2; // Facing -X (towards coffee table)
@@ -1421,7 +1865,7 @@ class Office3D {
 
         // 4. Kursi Sofa Depan (2-Seater facing coffee table from south)
         // Generous 67.5cm clearance to coffee table
-        const frontSofaColor = isLight ? 0x7c3aed : 0x6d28d9;
+        const frontSofaColor = isLight ? 0xc2d5c3 : 0x064e3b;
         const frontSofa = this.createSofaMesh(2.0, 1.05, frontSofaColor, isLight);
         frontSofa.position.set(3.8, 0, 5.55);
         frontSofa.rotation.y = 0; // Facing +Z (towards coffee table)
@@ -1647,7 +2091,7 @@ class Office3D {
             const agent = agentUnit.userData.agentData;
             const deskTop = agentUnit.deskGroup.getObjectByName(`DeskTop_${id}`);
             if (deskTop) {
-                deskTop.material.color.setHex(isLight ? 0xffffff : 0x334155);
+                deskTop.material.color.setHex(isLight ? 0xded4c3 : 0x1e293b);
             }
 
             const oldSprite = agentUnit.avatarGroup.getObjectByName(`BadgeSprite_${id}`);
@@ -1710,10 +2154,10 @@ class Office3D {
         deskGroup.rotation.y = rotY;
         deskGroup.userData = { agentId: id, agentData: agent, isDesk: true };
 
-        // Desk Surface
+        // Desk Surface (Scandinavian Blonde Birch Wood - Matches Reference Image)
         const deskTop = new THREE.Mesh(
             new THREE.BoxGeometry(2.4, 0.1, 1.3),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0xffffff : 0x334155, roughness: 0.35 })
+            new THREE.MeshStandardMaterial({ color: isLight ? 0xded4c3 : 0x1e293b, roughness: 0.35 })
         );
         deskTop.position.y = 1.05;
         deskTop.castShadow = true;
@@ -1721,8 +2165,8 @@ class Office3D {
         deskTop.name = `DeskTop_${id}`;
         deskGroup.add(deskTop);
 
-        // Metal Desk Legs - Dark graphite slate for architectural contrast against the warm floor
-        const legMat = new THREE.MeshStandardMaterial({ color: isLight ? 0x1e293b : 0x0f172a, metalness: 0.8, roughness: 0.3 });
+        // Sleek Minimalist Matte Black Steel Desk Legs
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.8, roughness: 0.3 });
         const legOffsets = [
             [-1.1, 0.525, -0.55],
             [1.1, 0.525, -0.55],
@@ -1730,18 +2174,18 @@ class Office3D {
             [1.1, 0.525, 0.55]
         ];
         legOffsets.forEach(pos => {
-            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.05, 0.08), legMat);
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.05, 0.06), legMat);
             leg.position.set(...pos);
             leg.castShadow = true;
             deskGroup.add(leg);
         });
 
-        // Acoustic Divider Screen (at back edge of desk) - Deep slate felt for clear silhouette
+        // Open & Airy Workstation (Subtle low rim instead of tall clunky divider)
         const divider = new THREE.Mesh(
-            new THREE.BoxGeometry(2.35, 0.55, 0.04),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x334155 : 0x1e293b, roughness: 0.8 })
+            new THREE.BoxGeometry(2.35, 0.12, 0.03),
+            new THREE.MeshStandardMaterial({ color: isLight ? 0xc4b7a6 : 0x334155, roughness: 0.6 })
         );
-        divider.position.set(0, 1.35, -0.62);
+        divider.position.set(0, 1.15, -0.62);
         deskGroup.add(divider);
 
         // Desk Mat / Mousepad (Placed on the front half of the desk)
@@ -1800,14 +2244,14 @@ class Office3D {
         mug.position.set(-0.85, 1.16, 0.25);
         deskGroup.add(mug);
 
-        // Ergonomic Office Swivel Chair (Natural distance in front of desk)
-        const chairColor = agent.avatar_color ? parseInt(agent.avatar_color.replace('#', '0x'), 16) : 0x3b82f6;
+        // Ergonomic Office Swivel Chair with Peach / Terracotta Fabric Cushions (Matches Reference Image)
+        const chairCushionColor = isLight ? 0xe29578 : (agent.avatar_color ? parseInt(agent.avatar_color.replace('#', '0x'), 16) : 0x38bdf8);
         const chair = new THREE.Group();
         chair.position.set(0, 0, 0.95);
 
         const seat = new THREE.Mesh(
             new THREE.BoxGeometry(0.75, 0.12, 0.7),
-            new THREE.MeshStandardMaterial({ color: isLight ? 0x475569 : 0x1e293b, roughness: 0.6 })
+            new THREE.MeshStandardMaterial({ color: chairCushionColor, roughness: 0.6 })
         );
         seat.position.y = 0.65;
         seat.castShadow = true;
@@ -1815,7 +2259,7 @@ class Office3D {
 
         const back = new THREE.Mesh(
             new THREE.BoxGeometry(0.7, 0.75, 0.1),
-            new THREE.MeshStandardMaterial({ color: chairColor, roughness: 0.5 })
+            new THREE.MeshStandardMaterial({ color: chairCushionColor, roughness: 0.5 })
         );
         back.position.set(0, 1.05, 0.32);
         back.castShadow = true;
@@ -2503,30 +2947,34 @@ class Office3D {
 
     createTextBadgeSprite(name, role, status) {
         const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 150;
+        canvas.width = 160;
+        canvas.height = 160;
         const ctx = canvas.getContext('2d');
         const isLight = this.currentTheme === 'light';
 
         const isWorking = status === 'KERJA';
         const isIdle = status === 'IDLE';
-        const statusColor = isWorking ? '#059669' : (isIdle ? '#d97706' : '#475569');
-        const statusGlow = isWorking ? '#10b981' : (isIdle ? '#f59e0b' : '#94a3b8');
+        const statusColor = isWorking ? '#10b981' : (isIdle ? '#f59e0b' : '#64748b');
 
-        // 1. High-Contrast Ambient Drop Shadow
+        // Extract 1 to 3 uppercase initials (e.g. KA, RH, BPP, M, T, BE, KL, Y, BS, AB)
+        const parts = name.trim().split(/\s+/).filter(Boolean);
+        let initials = '';
+        if (parts.length === 1) {
+            initials = parts[0].slice(0, 2).toUpperCase();
+        } else if (parts.length === 2) {
+            initials = (parts[0][0] + parts[1][0]).toUpperCase();
+        } else {
+            initials = (parts[0][0] + parts[1][0] + parts[2][0]).toUpperCase();
+        }
+
+        // Soft drop shadow
         ctx.save();
-        ctx.shadowColor = isLight ? 'rgba(15, 23, 42, 0.45)' : 'rgba(0, 0, 0, 0.85)';
-        ctx.shadowBlur = 14;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+        ctx.shadowBlur = 12;
         ctx.shadowOffsetY = 4;
 
-        // Card Outer Dimensions
-        const x = 10;
-        const y = 8;
-        const w = 492;
-        const h = 134;
-        const r = 20;
-
-        // Card rounded background
+        // Clean white rounded card
+        const x = 16, y = 16, w = 128, h = 128, r = 26;
         ctx.beginPath();
         ctx.moveTo(x + r, y);
         ctx.lineTo(x + w - r, y);
@@ -2539,74 +2987,41 @@ class Office3D {
         ctx.quadraticCurveTo(x, y, x + r, y);
         ctx.closePath();
 
-        ctx.fillStyle = isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.95)';
+        ctx.fillStyle = isLight ? '#ffffff' : '#0f172a';
         ctx.fill();
         ctx.restore();
 
-        // 2. High-Contrast Outer Border
-        ctx.lineWidth = isLight ? 4.5 : 3.5;
-        ctx.strokeStyle = isLight ? '#0f172a' : statusGlow;
+        // Subtle outer border
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = isLight ? '#e2e8f0' : statusColor;
         ctx.stroke();
 
-        // 3. Top Accent Status Stripe
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + 10);
-        ctx.lineTo(x, y + 10);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-        ctx.fillStyle = statusColor;
-        ctx.fill();
-        ctx.restore();
-
-        // 4. Agent Name (Bold, High Contrast 900 weight)
-        ctx.font = '900 32px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif';
-        ctx.fillStyle = isLight ? '#090d16' : '#ffffff';
+        // Initials Text (Clean bold uppercase matching reference image)
+        ctx.font = '900 ' + (initials.length >= 3 ? '44px' : '52px') + ' "Inter", "Segoe UI", sans-serif';
+        ctx.fillStyle = isLight ? '#1e293b' : '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(name, 256, 48);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(initials, 80, 80);
 
-        // 5. Agent Role Subtitle (Clear Architectural Typography)
-        ctx.font = '600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif';
-        ctx.fillStyle = isLight ? '#334155' : '#94a3b8';
-        ctx.fillText(role, 256, 76);
-
-        // 6. Solid High-Contrast Status Pill Tag
-        const pillW = 244;
-        const pillH = 32;
-        const pillX = 256 - (pillW / 2);
-        const pillY = 94;
-        const pillR = 16;
-
-        ctx.beginPath();
-        ctx.moveTo(pillX + pillR, pillY);
-        ctx.lineTo(pillX + pillW - pillR, pillY);
-        ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + pillR);
-        ctx.lineTo(pillX + pillW, pillY + pillH - pillR);
-        ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - pillR, pillY + pillH);
-        ctx.lineTo(pillX + pillR, pillY + pillH);
-        ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - pillR);
-        ctx.lineTo(pillX, pillY + pillR);
-        ctx.quadraticCurveTo(pillX, pillY, pillX + pillR, pillY);
-        ctx.closePath();
+        // Small circular status dot
         ctx.fillStyle = statusColor;
+        ctx.beginPath();
+        ctx.arc(118, 36, 7.5, 0, Math.PI * 2);
         ctx.fill();
-
-        // Status Pill Text (Crisp White Bold)
-        const statusLabel = isIdle ? '☕ IDLE (Di Lounge)' : (isWorking ? '● KERJA (Di Meja)' : '⏸ PAUSED');
-        ctx.font = 'bold 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(statusLabel, 256, 116);
+        ctx.strokeStyle = isLight ? '#ffffff' : '#0f172a';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.minFilter = THREE.LinearFilter;
 
-        const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        const spriteMat = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false
+        });
         const sprite = new THREE.Sprite(spriteMat);
-        sprite.scale.set(2.4, 0.70, 1);
+        sprite.scale.set(0.9, 0.9, 1.0);
         return sprite;
     }
 
@@ -2831,6 +3246,18 @@ class Office3D {
             this.serverLeds.forEach((led, i) => {
                 led.visible = Math.sin(elapsedTime * 6 + i * 1.5) > -0.2;
             });
+        }
+
+        // Cute Shiba Inu Mascot tail wagging & breathing
+        if (this.shibaGroup) {
+            const tail = this.shibaGroup.getObjectByName('ShibaTailPivot');
+            if (tail) {
+                tail.rotation.y = Math.sin(elapsedTime * 6.5) * 0.35;
+            }
+            const head = this.shibaGroup.getObjectByName('ShibaHeadPivot');
+            if (head) {
+                head.rotation.z = Math.sin(elapsedTime * 1.8) * 0.08;
+            }
         }
 
         // Dynamic Furniture Pop-in Animation
