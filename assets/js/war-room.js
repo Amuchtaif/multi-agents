@@ -9,7 +9,7 @@
     // Attach War Room methods to AppController prototype
     if (typeof AppController !== 'undefined') {
         
-        AppController.prototype.openWarRoomModal = function() {
+        AppController.prototype.openWarRoomModal = function(forceLiveView = false) {
             const modal = document.getElementById('modal-war-room');
             if (!modal) return;
 
@@ -45,9 +45,19 @@
                 leadSelect.innerHTML = this.agents.map(a => `<option value="${a.id}">${a.name} (${a.role})</option>`).join('');
             }
 
-            // Reset UI states
-            document.getElementById('war-room-setup-view')?.classList.remove('hidden');
-            document.getElementById('war-room-live-view')?.classList.add('hidden');
+            // Determine whether to show Live View or Setup View
+            const shouldShowLive = forceLiveView || (this.activeMeeting && (this.activeMeeting.status === 'in_progress' || this.activeMeeting.result));
+
+            if (shouldShowLive) {
+                document.getElementById('war-room-setup-view')?.classList.add('hidden');
+                document.getElementById('war-room-live-view')?.classList.remove('hidden');
+                if (this.activeMeeting && this.activeMeeting.result) {
+                    this.renderLiveMeetingResults(this.activeMeeting.result);
+                }
+            } else {
+                document.getElementById('war-room-setup-view')?.classList.remove('hidden');
+                document.getElementById('war-room-live-view')?.classList.add('hidden');
+            }
 
             modal.classList.remove('hidden');
         };
@@ -55,6 +65,30 @@
         AppController.prototype.closeWarRoomModal = function() {
             const modal = document.getElementById('modal-war-room');
             if (modal) modal.classList.add('hidden');
+        };
+
+        AppController.prototype.openWarRoomLiveView = function() {
+            this.openWarRoomModal(true);
+        };
+
+        AppController.prototype.minimizeMeetingToHUD = function() {
+            this.closeWarRoomModal();
+            if (this.activeMeeting) {
+                const tracker = document.getElementById('floating-meeting-tracker');
+                if (tracker) tracker.classList.remove('hidden');
+                this.showToast('Memantau pergerakan agent di Kantor 3D...', 'info');
+            }
+        };
+
+        AppController.prototype.focusMeetingRoom3D = function() {
+            if (this.office3D && typeof this.office3D.focusMeetingRoom === 'function') {
+                this.office3D.focusMeetingRoom();
+                this.showToast('Kamera 3D difokuskan ke Ruang Rapat & TV.', 'info');
+            }
+        };
+
+        AppController.prototype.endActiveMeeting = function() {
+            this.endCurrentMeeting();
         };
 
         AppController.prototype.setWarRoomTopic = function(topicText) {
@@ -107,30 +141,74 @@
 
             const rounds = Number(document.getElementById('war-room-rounds-select')?.value || 2);
 
+            // Record active meeting state
+            this.activeMeeting = {
+                topic: topic,
+                agentIds: agentIds,
+                rounds: rounds,
+                status: 'in_progress',
+                startTime: Date.now(),
+                result: null
+            };
+
             // Switch to Live Meeting View
             document.getElementById('war-room-setup-view')?.classList.add('hidden');
             const liveView = document.getElementById('war-room-live-view');
             if (liveView) liveView.classList.remove('hidden');
 
-            document.getElementById('war-room-live-topic-badge').textContent = topic;
+            const liveTopicBadge = document.getElementById('war-room-live-topic-badge');
+            if (liveTopicBadge) liveTopicBadge.textContent = topic;
+
             const messagesContainer = document.getElementById('war-room-messages-container');
             if (messagesContainer) {
                 messagesContainer.innerHTML = `
-                    <div class="text-center py-8 text-slate-400 flex flex-col items-center gap-3">
-                        <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-500"></i>
-                        <p class="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            Mengorkestrasi pergerakan agent ke Ruang Rapat & memulai diskusi multi-agent...
+                    <div class="text-center py-10 text-slate-400 flex flex-col items-center gap-3">
+                        <i class="fa-solid fa-spinner fa-spin text-3xl text-indigo-500"></i>
+                        <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                            Mengorkestrasi pergerakan agent ke Ruang Rapat & memulai diskusi...
+                        </p>
+                        <p class="text-xs text-slate-500 max-w-sm">
+                            Agent sedang berjalan menuju meja bundar 3D. Dialog dan notulensi akan muncul secara otomatis di sini.
                         </p>
                     </div>
                 `;
             }
+
+            // Update Floating Live Meeting Tracker HUD Overlay
+            const tracker = document.getElementById('floating-meeting-tracker');
+            if (tracker) {
+                tracker.classList.remove('hidden');
+                const pulse = document.getElementById('floating-meeting-pulse');
+                if (pulse) {
+                    pulse.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 pulse-red animate-pulse';
+                }
+                const badge = document.getElementById('floating-meeting-badge');
+                if (badge) {
+                    badge.className = 'text-[9px] font-mono uppercase font-bold px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20';
+                    badge.textContent = 'LIVE WAR ROOM';
+                }
+                const roundEl = document.getElementById('floating-meeting-round');
+                if (roundEl) roundEl.textContent = `${agentIds.length} Agent • ${rounds} Putaran`;
+
+                const topicEl = document.getElementById('floating-meeting-topic');
+                if (topicEl) {
+                    topicEl.textContent = topic;
+                    topicEl.title = topic;
+                }
+
+                const transcriptBtn = document.getElementById('floating-meeting-transcript-btn');
+                if (transcriptBtn) transcriptBtn.textContent = 'Transkrip & Notulensi';
+            }
+
+            // AUTO MINIMIZE MODAL so user can observe agents walking into meeting room in 3D!
+            this.closeWarRoomModal();
 
             // 3D Locomotion: Send agents to meeting chairs
             if (this.office3D && typeof this.office3D.startTeamMeeting === 'function') {
                 this.office3D.startTeamMeeting(agentIds, topic);
             }
 
-            this.showToast(`🚨 Memulai Rapat Tim: "${topic}" (${agentIds.length} Agent, ${rounds} Putaran)...`, 'info');
+            this.showToast(`🚨 Memulai Rapat Tim: "${topic}" (${agentIds.length} Agent). Memantau di kantor 3D...`, 'info');
 
             try {
                 const res = await fetch('api/meetings.php', {
@@ -148,14 +226,37 @@
 
                 if (data.success && data.data) {
                     const result = data.data;
+                    if (this.activeMeeting) {
+                        this.activeMeeting.status = 'completed';
+                        this.activeMeeting.result = result;
+                    }
                     this.renderLiveMeetingResults(result);
+
+                    // Update Floating Tracker HUD to Completed state
+                    if (tracker) {
+                        const pulse = document.getElementById('floating-meeting-pulse');
+                        if (pulse) pulse.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-green animate-pulse';
+
+                        const badge = document.getElementById('floating-meeting-badge');
+                        if (badge) {
+                            badge.className = 'text-[9px] font-mono uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20';
+                            badge.textContent = '✅ NOTULENSI SIAP';
+                        }
+
+                        const roundEl = document.getElementById('floating-meeting-round');
+                        if (roundEl) roundEl.textContent = `${result.tasks_created?.length || 0} Poin Aksi`;
+
+                        const transcriptBtn = document.getElementById('floating-meeting-transcript-btn');
+                        if (transcriptBtn) transcriptBtn.textContent = 'Buka Notulensi & Aksi';
+                    }
 
                     // Update 3D TV Screen with final meeting status
                     if (this.office3D && typeof this.office3D.updateMeetingTVScreen === 'function') {
-                        this.office3D.updateMeetingTVScreen(topic, 'Notulensi Selesai', 'Poin Aksi Dibuat', result.summary.slice(0, 100));
+                        const firstSpeech = result.summary || 'Rapat selesai dengan sukses.';
+                        this.office3D.updateMeetingTVScreen(topic, 'Notulensi Selesai', `${result.tasks_created?.length || 0} Aksi`, firstSpeech.slice(0, 100));
                     }
 
-                    this.showToast(`✅ ${data.message}`, 'success');
+                    this.showToast(`✅ Rapat Tim Selesai! ${result.tasks_created?.length || 0} tugas baru didelegasikan. Klik Floating Tracker untuk melihat Notulensi.`, 'success');
 
                     // Refresh backlog tasks & logs in background
                     await this.loadTasks();
@@ -336,6 +437,10 @@
             if (this.office3D && typeof this.office3D.endTeamMeeting === 'function') {
                 this.office3D.endTeamMeeting();
             }
+            const tracker = document.getElementById('floating-meeting-tracker');
+            if (tracker) tracker.classList.add('hidden');
+            this.activeMeeting = null;
+
             this.showToast('Rapat tim diselesaikan. Para agent kembali ke stasiun kerja masing-masing.', 'info');
             this.closeWarRoomModal();
         };

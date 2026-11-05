@@ -2166,6 +2166,7 @@ class AppController {
                 this.closeAgentQuickHud();
                 this.closeAISettingsModal();
                 this.closeTaskResultModal();
+                this.closeWarRoomModal();
             }
         });
     }

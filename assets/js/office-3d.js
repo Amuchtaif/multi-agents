@@ -3783,11 +3783,20 @@ class Office3D {
      * Returns bounding boxes for all office static obstacles (furniture, walls, equipment)
      */
     getStaticObstacles(ignoreTargetId = null, currentAgentId = null) {
+        let isInsideMeeting = false;
+        if (currentAgentId && this.agents && this.agents.has(currentAgentId)) {
+            const agPos = this.agents.get(currentAgentId).avatarGroup.position;
+            if (agPos && agPos.z < -5.6 && agPos.x < -3.2) {
+                isInsideMeeting = true;
+            }
+        }
+        const ignoreMeeting = (ignoreTargetId && ignoreTargetId.startsWith('meet_chair')) || isInsideMeeting;
+
         const list = [
             // Center Low Planter Credenza Divider (x: [-0.34, 0.34], z: [1.1, 4.9])
             { name: 'Planter Credenza', minX: -0.45, maxX: 0.45, minZ: 0.95, maxZ: 5.05 },
-            // Meeting Room Architectural Glass Enclosure (allowed if character is entering conference chair)
-            ...((!ignoreTargetId || !ignoreTargetId.startsWith('meet_chair')) ? [{ name: 'Meeting Room', minX: -12.0, maxX: -3.4, minZ: -12.0, maxZ: -5.9 }] : []),
+            // Meeting Room Architectural Glass Enclosure (allowed if character is entering conference chair or already inside)
+            ...((!ignoreMeeting) ? [{ name: 'Meeting Room', minX: -12.0, maxX: -3.4, minZ: -12.0, maxZ: -5.9 }] : []),
             // Back Server Hub & Infrastructure
             { name: 'Server Racks', minX: 6.6, maxX: 9.8, minZ: -11.5, maxZ: -9.5 },
             // Coffee Bar Counter
@@ -3909,7 +3918,12 @@ class Office3D {
         const onCentralWalkway = Math.abs(startPos.z - 0.0) < 0.25;
 
         if (!onCentralWalkway) {
-            if (startPos.z > 5.0) {
+            if (startPos.z < -5.5 && startPos.x < -3.2) {
+                // Coming from Meeting Room
+                waypoints.push(new THREE.Vector3(-4.5, 0, -6.5));
+                waypoints.push(new THREE.Vector3(-3.0, 0, -5.5));
+                waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+            } else if (startPos.z > 5.0) {
                 // Coming from Lounge
                 if (spotId.startsWith('stool') && mode === 'KERJA') {
                     waypoints.push(new THREE.Vector3(startPos.x, 0, 4.4));
@@ -4094,14 +4108,21 @@ class Office3D {
                 nav.targetRot = meetingSpot.rotY;
 
                 const waypoints = [];
-                // 1. To central spine
-                if (curPos.z > 2.0) {
-                    waypoints.push(new THREE.Vector3(curPos.x, 0, 5.0));
-                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.0));
+                // 1. Smooth path to central spine (z = 0.0) avoiding lounge furniture or desks
+                if (curPos.z > 5.0) {
+                    // Coming from Lounge
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
                     waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 } else if (curPos.z < -2.0) {
+                    // Coming from Back Corridor
                     waypoints.push(new THREE.Vector3(curPos.x, 0, -4.2));
                     waypoints.push(new THREE.Vector3(-3.0, 0, -4.2));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                } else if (Math.abs(curPos.z) > 0.4) {
+                    // Coming from Desk
+                    waypoints.push(new THREE.Vector3(curPos.x, 0, 0.0));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 } else {
                     waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 }
@@ -4151,14 +4172,29 @@ class Office3D {
             const nav = agentUnit.navigation;
             if (nav && (nav.state === 'IN_MEETING' || nav.state === 'WALKING_TO_MEETING')) {
                 nav.meetingSpot = null;
-                this.startAgentLocomotion(agentUnit, 'KERJA');
+                const agent = agentUnit.userData ? agentUnit.userData.agentData : null;
+                const targetStatus = (agent && agent.status === 'KERJA') ? 'KERJA' : 'IDLE';
+                this.startAgentLocomotion(agentUnit, targetStatus);
             }
         }
     }
 
     focusMeetingRoom() {
         if (!this.webglAvailable) return;
-        this.targetLookAt.set(-7.5, 1.8, -8.75);
+        this.targetLookAt.set(-7.5, 1.4, -8.75);
+        if (this.camera) {
+            const startPos = this.camera.position.clone();
+            const targetPos = new THREE.Vector3(-1.8, 8.5, -1.8);
+            let progress = 0;
+            const animateCam = () => {
+                progress += 0.04;
+                this.camera.position.lerpVectors(startPos, targetPos, Math.min(progress, 1.0));
+                if (progress < 1.0) {
+                    requestAnimationFrame(animateCam);
+                }
+            };
+            requestAnimationFrame(animateCam);
+        }
     }
 
     interactWithCat() {
@@ -4622,17 +4658,22 @@ class Office3D {
             if (this.selectedAgentId === id) {
                 this.selectionLight.position.x = avatarGroup.position.x;
                 this.selectionLight.position.z = avatarGroup.position.z;
-                if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT') {
+                if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT' || navigation.state === 'WALKING_TO_MEETING') {
                     this.targetLookAt.set(avatarGroup.position.x, 1.2, avatarGroup.position.z);
                 }
             }
 
             // AUTONOMOUS LOUNGE & STROLL SCHEDULER FOR FINISHED / IDLE / PAUSED AGENTS
+            const isInMeeting = navigation.state === 'IN_MEETING' || navigation.state === 'WALKING_TO_MEETING';
             const isPaused = agent.status === 'PAUSED';
             const isTaskDone = this.isAgentTaskFinished(agent);
 
+            // If agent is attending or walking to team meeting, NEVER interrupt!
+            if (isInMeeting) {
+                // Keep meeting state intact
+            }
             // If agent is PAUSED, ensure their position is the Sofa Lounge!
-            if (isPaused) {
+            else if (isPaused) {
                 if (navigation.state !== 'RESTING' && navigation.state !== 'WALKING_TO_REST') {
                     if (!navigation.lockUntil || Date.now() > navigation.lockUntil) {
                         this.startAgentLocomotion(agentUnit, 'PAUSED');
@@ -4688,8 +4729,8 @@ class Office3D {
                 }
             }
 
-            // 1. WALKING LOCOMOTION (Traveling between Workstation & Lounge with Waypoints)
-            if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT') {
+            // 1. WALKING LOCOMOTION (Traveling between Workstation, Lounge & Meeting with Waypoints)
+            if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT' || navigation.state === 'WALKING_TO_MEETING') {
                 const curPos = avatarGroup.position;
                 let currentWp = navigation.targetPos;
 
@@ -4745,7 +4786,9 @@ class Office3D {
                     const prevZ = curPos.z;
 
                     // Robust obstacle collision sliding with Whisker Evasion & own desk clearance
-                    const ignoreTarget = (navigation.state === 'WALKING_TO_REST' && navigation.restSpot) ? navigation.restSpot.id : null;
+                    const ignoreTarget = (navigation.state === 'WALKING_TO_REST' && navigation.restSpot) 
+                        ? navigation.restSpot.id 
+                        : ((navigation.state === 'WALKING_TO_MEETING' && navigation.meetingSpot) ? navigation.meetingSpot.id : null);
                     const resolved = this.resolveObstacleCollision(curPos, moveX, moveZ, 0.28, ignoreTarget, id);
                     curPos.x = resolved.x;
                     curPos.z = resolved.z;
@@ -4821,6 +4864,9 @@ class Office3D {
                         } else if (navigation.state === 'WALKING_TO_OBJECT') {
                             navigation.state = 'VISITING_OBJECT';
                             this.applyVisitingObjectPose(agentUnit, navigation.targetSpot);
+                        } else if (navigation.state === 'WALKING_TO_MEETING') {
+                            navigation.state = 'IN_MEETING';
+                            this.applyMeetingSittingPose(agentUnit);
                         } else {
                             navigation.state = 'WORKING';
                             this.applyDeskSittingPose(agentUnit);
@@ -4883,6 +4929,22 @@ class Office3D {
                         head.rotation.x = -0.10 + Math.sin(elapsedTime * 1.1 + id) * 0.05;
                     }
                 }
+            }
+
+            // 2c. IN_MEETING STATE (Attentive discussion in War Room)
+            else if (navigation.state === 'IN_MEETING') {
+                curPos.y = 0.08;
+                if (spine) {
+                    spine.rotation.z = Math.sin(elapsedTime * 0.7 + id) * 0.02;
+                    spine.rotation.x = 0.04 + Math.sin(elapsedTime * 1.2 + id) * 0.02;
+                }
+                if (head) {
+                    // Attentive head movement towards TV or speakers
+                    head.rotation.y = Math.sin(elapsedTime * 0.8 + id * 1.5) * 0.22;
+                    head.rotation.x = -0.05 + Math.sin(elapsedTime * 1.6 + id) * 0.03;
+                }
+                if (armL) armL.rotation.set(-0.65 + Math.sin(elapsedTime * 1.1 + id) * 0.03, 0.15, 0.05);
+                if (armR) armR.rotation.set(-0.65 + Math.cos(elapsedTime * 1.3 + id) * 0.03, -0.15, -0.05);
             }
 
             // 3. WORKING STATE (At Workstation Desk)

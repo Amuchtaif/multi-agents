@@ -251,6 +251,44 @@
                 </button>
             </div>
 
+            <!-- Floating Live Meeting Tracker HUD Overlay (War Room) -->
+            <div id="floating-meeting-tracker" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2 rounded-2xl glass-panel-elevated border border-indigo-500/40 shadow-2xl backdrop-blur-md max-w-xl transition-all duration-300">
+                <div class="flex items-center gap-2.5 shrink-0">
+                    <span id="floating-meeting-pulse" class="w-2.5 h-2.5 rounded-full bg-rose-500 pulse-red animate-pulse"></span>
+                    <div>
+                        <div class="flex items-center gap-1.5">
+                            <span id="floating-meeting-badge" class="text-[9px] font-mono uppercase font-bold px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20">LIVE WAR ROOM</span>
+                            <span id="floating-meeting-round" class="text-[9px] font-mono text-slate-500 dark:text-slate-400">Diskusi Aktif</span>
+                        </div>
+                        <div id="floating-meeting-topic" class="text-xs font-bold text-slate-800 dark:text-white max-w-[210px] truncate" title="Topik Rapat">
+                            Topik Rapat Tim
+                        </div>
+                    </div>
+                </div>
+
+                <div class="h-6 w-px bg-slate-200 dark:bg-white/10 shrink-0"></div>
+
+                <!-- Action Controls -->
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button type="button" onclick="window.app.openWarRoomLiveView()"
+                            class="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-sm shadow-indigo-600/20 transition-all cursor-pointer"
+                            title="Buka dialog transkrip & notulensi rapat">
+                        <i class="fa-solid fa-comments"></i>
+                        <span id="floating-meeting-transcript-btn">Transkrip & Notulensi</span>
+                    </button>
+                    <button type="button" onclick="window.app.focusMeetingRoom3D()"
+                            class="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs transition-colors cursor-pointer"
+                            title="Fokus Kamera 3D ke Ruang Rapat & TV">
+                        <i class="fa-solid fa-video"></i>
+                    </button>
+                    <button type="button" onclick="window.app.endActiveMeeting()"
+                            class="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-xs transition-colors cursor-pointer"
+                            title="Bubarkan Rapat & Kembali ke Meja">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+            </div>
+
             <!-- Hover Canvas Tooltip -->
             <div id="canvas-tooltip" class="absolute top-4 left-4 glass-panel-elevated p-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs shadow-xl opacity-0 pointer-events-none transition-opacity duration-150 z-10 max-w-xs"></div>
 
@@ -1380,11 +1418,19 @@
                                     <h4 id="war-room-live-topic-badge" class="font-bold text-xs text-slate-900 dark:text-white truncate">-</h4>
                                 </div>
                             </div>
-                            <button onclick="window.app.endCurrentMeeting()"
-                                    class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all">
-                                <i class="fa-solid fa-flag-checkered"></i>
-                                <span>Selesaikan Rapat</span>
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button onclick="window.app.minimizeMeetingToHUD()"
+                                        class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                                        title="Tutup dialog modal dan pantau pergerakan agent di kantor 3D">
+                                    <i class="fa-solid fa-cube"></i>
+                                    <span>Pantau di Kantor 3D</span>
+                                </button>
+                                <button onclick="window.app.endCurrentMeeting()"
+                                        class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer">
+                                    <i class="fa-solid fa-flag-checkered"></i>
+                                    <span>Bubarkan Rapat</span>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Live Dialogue Balloon Container -->
