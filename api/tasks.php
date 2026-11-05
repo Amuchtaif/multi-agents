@@ -15,8 +15,21 @@ switch ($method) {
         break;
 
     case 'POST':
-        if (isset($input['action']) && $input['action'] === 'delete_all') {
+        $action = $input['action'] ?? ($_GET['action'] ?? '');
+        if ($action === 'delete_all') {
             handleDeleteAllTasks($pdo);
+            break;
+        }
+        if ($action === 'approve') {
+            handleApproveTask($pdo, $input);
+            break;
+        }
+        if ($action === 'request_revision') {
+            handleRequestRevision($pdo, $input);
+            break;
+        }
+        if ($action === 'reject') {
+            handleRejectTask($pdo, $input);
             break;
         }
         handleCreateTask($pdo);
@@ -216,7 +229,7 @@ function handleUpdateTask(PDO $pdo) {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
 
-        // If status changed to completed, optionally reward agent and log
+        // If status changed to completed, update agent status & log
         if (isset($input['status']) && $input['status'] === 'completed' && $task['status'] !== 'completed') {
             if ($task['assigned_agent_id']) {
                 $agentId = (int)$task['assigned_agent_id'];
@@ -228,6 +241,18 @@ function handleUpdateTask(PDO $pdo) {
                     "Tugas selesai: '{$task['title']}'",
                     json_encode(['task_id' => $id, 'status' => 'completed'])
                 ]);
+
+                // Check if agent has other in-progress work
+                $chkOther = $pdo->prepare("SELECT COUNT(*) FROM tasks WHERE assigned_agent_id = ? AND status = 'in_progress' AND id != ?");
+                $chkOther->execute([$agentId, $id]);
+                if (((int)$chkOther->fetchColumn()) === 0) {
+                    $pdo->prepare("UPDATE agents SET status = 'IDLE', current_task = 'Standby (Tugas selesai)' WHERE id = ?")->execute([$agentId]);
+                    $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'system', ?, ?)")->execute([
+                        $agentId,
+                        "☕ Seluruh tugas aktif selesai. Agent beralih ke status IDLE / Standby di Lounge.",
+                        json_encode(['task_id' => $id, 'status' => 'IDLE', 'location' => 'lounge'])
+                    ]);
+                }
             }
         }
 
@@ -309,5 +334,139 @@ function handleDeleteAllTasks(PDO $pdo) {
     } catch (Exception $e) {
         sendJsonResponse(['success' => false, 'error' => 'Gagal menghapus semua tugas: ' . $e->getMessage()], 500);
     }
+}
+
+/**
+ * POST: Approve task and trigger execution
+ */
+function handleApproveTask(PDO $pdo, array $input) {
+    $taskId = (int)($input['task_id'] ?? ($input['id'] ?? 0));
+    if (!$taskId) {
+        sendJsonResponse(['success' => false, 'error' => 'task_id wajib diisi'], 400);
+    }
+
+    $tStmt = $pdo->prepare("
+        SELECT t.*, a.name as agent_name 
+        FROM tasks t 
+        LEFT JOIN agents a ON t.assigned_agent_id = a.id 
+        WHERE t.id = ?
+    ");
+    $tStmt->execute([$taskId]);
+    $task = $tStmt->fetch();
+
+    if (!$task) {
+        sendJsonResponse(['success' => false, 'error' => 'Tugas tidak ditemukan'], 404);
+    }
+
+    $pdo->prepare("UPDATE tasks SET approval_status = 'approved', status = 'in_progress' WHERE id = ?")->execute([$taskId]);
+
+    // Log approval
+    $agentId = $task['assigned_agent_id'] ?: null;
+    $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'action', ?, ?)")
+        ->execute([
+            $agentId,
+            "✅ [OWNER APPROVAL] Tugas disetujui oleh Owner: '{$task['title']}'. Agent segera melanjutkan eksekusi.",
+            json_encode(['task_id' => $taskId, 'approval' => 'approved'])
+        ]);
+
+    // Execute via AIService
+    require_once __DIR__ . '/ai_service.php';
+    try {
+        $execResult = AIService::executeTask($pdo, $taskId);
+        sendJsonResponse([
+            'success' => true,
+            'message' => "Tugas disetujui dan telah diselesaikan oleh {$execResult['agent_name']}",
+            'data' => $execResult
+        ]);
+    } catch (Exception $e) {
+        sendJsonResponse([
+            'success' => true,
+            'message' => "Tugas disetujui. Agen telah memulai proses pengerjaan (Antrean).",
+            'task_id' => $taskId
+        ]);
+    }
+}
+
+/**
+ * POST: Request revision from agent with owner notes
+ */
+function handleRequestRevision(PDO $pdo, array $input) {
+    $taskId = (int)($input['task_id'] ?? ($input['id'] ?? 0));
+    $notes = trim($input['notes'] ?? ($input['revision_notes'] ?? ''));
+
+    if (!$taskId) {
+        sendJsonResponse(['success' => false, 'error' => 'task_id wajib diisi'], 400);
+    }
+
+    if (empty($notes)) {
+        sendJsonResponse(['success' => false, 'error' => 'Catatan revisi wajib diisi agar agent tahu apa yang perlu diperbaiki'], 422);
+    }
+
+    $tStmt = $pdo->prepare("
+        SELECT t.*, a.name as agent_name 
+        FROM tasks t 
+        LEFT JOIN agents a ON t.assigned_agent_id = a.id 
+        WHERE t.id = ?
+    ");
+    $tStmt->execute([$taskId]);
+    $task = $tStmt->fetch();
+
+    if (!$task) {
+        sendJsonResponse(['success' => false, 'error' => 'Tugas tidak ditemukan'], 404);
+    }
+
+    $pdo->prepare("UPDATE tasks SET approval_status = 'changes_requested', revision_notes = ?, status = 'pending' WHERE id = ?")
+        ->execute([$notes, $taskId]);
+
+    $agentId = $task['assigned_agent_id'] ?: null;
+    $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'action', ?, ?)")
+        ->execute([
+            $agentId,
+            "✏️ [MINTA REVISI] Owner memberikan catatan revisi pada '{$task['title']}': \"{$notes}\"",
+            json_encode(['task_id' => $taskId, 'revision_notes' => $notes])
+        ]);
+
+    sendJsonResponse([
+        'success' => true,
+        'message' => 'Catatan revisi berhasil dikirim ke Agent. Agent siap melakukan perbaikan.',
+        'data' => ['task_id' => $taskId, 'revision_notes' => $notes]
+    ]);
+}
+
+/**
+ * POST: Reject task
+ */
+function handleRejectTask(PDO $pdo, array $input) {
+    $taskId = (int)($input['task_id'] ?? ($input['id'] ?? 0));
+    $reason = trim($input['reason'] ?? 'Dibatalkan oleh Owner');
+
+    if (!$taskId) {
+        sendJsonResponse(['success' => false, 'error' => 'task_id wajib diisi'], 400);
+    }
+
+    $tStmt = $pdo->prepare("SELECT * FROM tasks WHERE id = ?");
+    $tStmt->execute([$taskId]);
+    $task = $tStmt->fetch();
+
+    if (!$task) {
+        sendJsonResponse(['success' => false, 'error' => 'Tugas tidak ditemukan'], 404);
+    }
+
+    $pdo->prepare("UPDATE tasks SET approval_status = 'rejected', status = 'completed', result_text = ? WHERE id = ?")
+        ->execute(["[DITOLAK OWNER] Alasan: {$reason}", $taskId]);
+
+    $agentId = $task['assigned_agent_id'] ?: null;
+    $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'action', ?, ?)")
+        ->execute([
+            $agentId,
+            "❌ [TUGAS DITOLAK] Owner menolak tugas: '{$task['title']}'. Alasan: {$reason}",
+            json_encode(['task_id' => $taskId, 'reason' => $reason])
+        ]);
+
+    sendJsonResponse([
+        'success' => true,
+        'message' => 'Tugas telah ditolak dan dibatalkan.',
+        'task_id' => $taskId
+    ]);
 }
 

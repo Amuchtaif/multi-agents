@@ -123,35 +123,14 @@ try {
         $taskCheck->execute([$agentId]);
         $activeTaskRow = $taskCheck->fetch(PDO::FETCH_ASSOC);
 
-        if ($activeTaskRow) {
-            $taskTitle = $activeTaskRow['title'];
-            $linkedTaskId = (int)$activeTaskRow['id'];
-        } elseif (empty($taskTitle) || $taskTitle === 'Menunggu penugasan' || $taskTitle === 'Menunggu instruksi tugas') {
-            // Assign a natural research topic based on role and department
-                        $defaultTopics = [
-                'Analyst' => 'Riset komparatif arsitektur 3D HQ & optimasi backlog orchestrator',
-                'Frontend' => 'Riset optimasi Three.js isometric rendering & kontras tema',
-                'Backend' => 'Riset event-driven streaming SSE & connection pool resilience',
-                'QA' => 'Automasi regression testing multi-agent CRUD endpoint',
-                'Research' => 'Benchmark prompt efficiency & context memory compaction',
-                'Media Sosial' => 'Analisis tren viral, copywriting reels/tiktok & engagement metrik',
-                'Sosial' => 'Penyusunan kalender konten media sosial & strategi pertumbuhan audiens',
-                'Konten' => 'Produksi draft copy artikel, storyboard visual & narasi brand',
-                'Content' => 'Riset topik trending, kurasi aset visual & optimasi copywriting',
-                'Brainstorming' => 'Eksplorasi ide kreatif, mind-mapping inovasi & konsep kampanye',
-                'Ideation' => 'Penyusunan hipotesis eksperimen produk & matriks prioritas solusi',
-                'Pemasaran' => 'Analisis performa kampanye multi-channel & konversi funnel',
-                'Marketing' => 'Optimasi strategi akuisisi pengguna & evaluasi metrik retensi',
-                'Desain' => 'Eksplorasi palet warna UI, prototipe grafis & aset interaktif'
-            ];
-            $taskTitle = 'Riset eksplorasi fitur dan analisis arsitektur sistem';
-            foreach ($defaultTopics as $roleKey => $topic) {
-                if (stripos($agent['role'], $roleKey) !== false || stripos($agent['department'], $roleKey) !== false) {
-                    $taskTitle = $topic;
-                    break;
-                }
-            }
+        if (!$activeTaskRow) {
+            // Agent has no active or pending tasks: transition cleanly to IDLE / Lounge
+            $pdo->prepare("UPDATE agents SET status = 'IDLE', current_task = 'Standby (Menunggu penugasan)', updated_at = NOW() WHERE id = ?")->execute([$agentId]);
+            continue;
         }
+
+        $taskTitle = $activeTaskRow['title'];
+        $linkedTaskId = (int)$activeTaskRow['id'];
 
         // Generate contextual autonomous research step
         $actionStep = ($agent['action_count'] + 1) % 6;
@@ -164,25 +143,30 @@ try {
         $taskCompleted = false;
         if ($eventData['type'] === 'task_complete') {
             $taskCompleted = true;
-            // NOTE: We NEVER complete real tasks from the tasks table with mock simulation text!
-            // Real tasks in the `tasks` table are strictly completed by AIService::executeTask with real deliverables.
         }
 
-        // Update agent record (Keep status KERJA, do NOT randomly flip to IDLE!)
-        $newCurrentTask = $agent['current_task'];
-        if (!$linkedTaskId && $taskCompleted) {
-            $newCurrentTask = "Standby: " . mb_substr($taskTitle, 0, 30);
+        if ($taskCompleted) {
+            $chkRemaining = $pdo->prepare("SELECT COUNT(*) FROM tasks WHERE assigned_agent_id = ? AND status IN ('in_progress', 'pending') AND id != ?");
+            $chkRemaining->execute([$agentId, $linkedTaskId]);
+            $hasRemaining = ((int)$chkRemaining->fetchColumn()) > 0;
+            $newStatus = $hasRemaining ? 'KERJA' : 'IDLE';
+            $newCurrentTask = $hasRemaining ? 'Lanjut tugas berikutnya' : 'Standby (Tugas selesai)';
+        } else {
+            $newStatus = 'KERJA';
+            $newCurrentTask = "Mengerjakan: " . mb_substr($taskTitle, 0, 30);
         }
+
         $updAgent = $pdo->prepare("
             UPDATE agents 
             SET token_usage = token_usage + ?, 
                 action_count = action_count + ?, 
                 context_memory = LEAST(128000, context_memory + ?),
                 current_task = ?,
+                status = ?,
                 updated_at = NOW()
             WHERE id = ?
         ");
-        $updAgent->execute([$tokenDelta, $actionDelta, (int)($tokenDelta * 0.7), $newCurrentTask, $agentId]);
+        $updAgent->execute([$tokenDelta, $actionDelta, (int)($tokenDelta * 0.7), $newCurrentTask, $newStatus, $agentId]);
 
         // Insert log into agent_logs
         $logStmt = $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, ?, ?, ?)");

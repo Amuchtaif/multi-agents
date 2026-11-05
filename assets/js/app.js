@@ -54,6 +54,16 @@ class AppController {
 
             // 6. Start background loop (handles both simulation and Real AI auto execution)
             this.startSimulationLoop();
+
+            // 7. Initialize Audio Ambience UI
+            if (window.officeAudio && typeof window.officeAudio.updateButtonUI === 'function') {
+                window.officeAudio.updateButtonUI();
+            }
+
+            // 8. Background pulse for due recurring scheduled tasks (Cron)
+            setInterval(() => {
+                fetch('api/schedules.php?action=run_due', { method: 'POST' }).catch(() => {});
+            }, 60000);
         } catch (initErr) {
             console.error("FATAL ERROR IN APP INIT:", initErr);
         }
@@ -394,10 +404,12 @@ class AppController {
                 if (autoExec && hasWorkingAgent && !this.isAutoExecutingRealAI) {
                     this.runRealAIAutoBacklogStep();
                 }
+                // REAL AI MODE: Strictly do NOT call simulate.php to prevent fake data/log pollution!
+                return;
             }
 
-            // CRITICAL: If no agent is working (all are PAUSED or IDLE), DO NOT run simulation!
-            if (!hasWorkingAgent) return;
+            // In Simulation Mode: Only proceed if simulation is enabled AND there are active working agents
+            if (!this.isSimulating || !hasWorkingAgent) return;
 
             // Autonomous Simulation & Multi-Agent Research Generator
             try {
@@ -981,12 +993,143 @@ class AppController {
                                 </button>
                             </div>
                         </div>
+
+                        ${task.category === 'nunggu_owner' && !isCompleted ? `
+                            <div class="mt-2.5 pt-2 border-t border-amber-200/60 dark:border-amber-800/40">
+                                <div class="flex items-center justify-between text-[10px] mb-1.5">
+                                    <span class="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500 pulse-amber"></span>
+                                        Persetujuan Owner
+                                    </span>
+                                    <span class="text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                        ${task.approval_status || 'pending'}
+                                    </span>
+                                </div>
+                                ${task.revision_notes ? `
+                                    <div class="mb-2 p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/40 text-[10px] text-amber-800 dark:text-amber-200 leading-snug">
+                                        <strong>Catatan Revisi:</strong> ${this.escapeHtml(task.revision_notes)}
+                                    </div>
+                                ` : ''}
+                                <div class="grid grid-cols-3 gap-1">
+                                    <button onclick="event.stopPropagation(); window.app.approveTask(${task.id})"
+                                            class="py-1 px-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center justify-center gap-1 shadow-xs transition-all cursor-pointer"
+                                            title="Setujui dan lanjutkan eksekusi">
+                                        <i class="fa-solid fa-check text-[9px]"></i>
+                                        <span>Setujui</span>
+                                    </button>
+                                    <button onclick="event.stopPropagation(); window.app.promptTaskRevision(${task.id})"
+                                            class="py-1 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                                            title="Ketik catatan revisi perbaikan">
+                                        <i class="fa-solid fa-pen-to-square text-[9px]"></i>
+                                        <span>Revisi</span>
+                                    </button>
+                                    <button onclick="event.stopPropagation(); window.app.rejectTask(${task.id})"
+                                            class="py-1 px-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-300 dark:border-rose-700/60 font-bold text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                                            title="Tolak dan batalkan tugas ini">
+                                        <i class="fa-solid fa-xmark text-[9px]"></i>
+                                        <span>Tolak</span>
+                                    </button>
+                                </div>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
 
             container.appendChild(card);
         });
+    }
+
+    async approveTask(taskId) {
+        this.showToast('✅ Menyetujui tugas dan memerintahkan Agent mengeksekusi...', 'info');
+        try {
+            const res = await fetch('api/tasks.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'approve', task_id: taskId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                this.showToast(data.message, 'success');
+                if (typeof this.playTaskCompletedSound === 'function') {
+                    this.playTaskCompletedSound();
+                }
+                await this.loadTasks();
+                await this.loadAgents();
+                await this.loadLogs();
+            } else {
+                this.showToast(`❌ Gagal: ${data.error}`, 'warning');
+            }
+        } catch (e) {
+            console.error('Error approving task:', e);
+            this.showToast('Gagal memproses persetujuan tugas', 'warning');
+        }
+    }
+
+    promptTaskRevision(taskId) {
+        this.currentRevisionTaskId = taskId;
+        const modal = document.getElementById('modal-task-revision');
+        const input = document.getElementById('task-revision-notes-input');
+        if (input) input.value = '';
+        if (modal) modal.classList.remove('hidden');
+    }
+
+    closeTaskRevisionModal() {
+        const modal = document.getElementById('modal-task-revision');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async submitTaskRevision() {
+        const taskId = this.currentRevisionTaskId;
+        const input = document.getElementById('task-revision-notes-input');
+        const notes = input ? input.value.trim() : '';
+
+        if (!notes) {
+            this.showToast('Silakan masukkan catatan revisi untuk Agent', 'warning');
+            return;
+        }
+
+        try {
+            const res = await fetch('api/tasks.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'request_revision',
+                    task_id: taskId,
+                    notes: notes
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                this.showToast('✅ Catatan revisi berhasil dikirim ke Agent!', 'success');
+                this.closeTaskRevisionModal();
+                await this.loadTasks();
+                await this.loadLogs();
+            } else {
+                this.showToast(`❌ Gagal: ${data.error}`, 'warning');
+            }
+        } catch (e) {
+            console.error('Error submitting revision:', e);
+        }
+    }
+
+    async rejectTask(taskId) {
+        if (!confirm('Yakin ingin menolak dan membatalkan tugas ini?')) return;
+        try {
+            const res = await fetch('api/tasks.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'reject', task_id: taskId, reason: 'Ditolak langsung oleh Owner via Action Card' })
+            });
+            const data = await res.json();
+            if (data.success) {
+                this.showToast('Tugas ditolak dan dibatalkan', 'info');
+                await this.loadTasks();
+                await this.loadLogs();
+            }
+        } catch (e) {
+            console.error('Error rejecting task:', e);
+        }
     }
 
     async toggleTaskCompletion(taskId, isChecked) {
@@ -1989,13 +2132,16 @@ class AppController {
         const btnFullscreen = document.getElementById('btn-toggle-fullscreen');
         if (btnFullscreen) {
             btnFullscreen.addEventListener('click', () => {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen();
-                } else {
-                    document.exitFullscreen();
-                }
+                this.toggle3DFullscreen();
             });
         }
+
+        // Native browser fullscreen change handler
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && document.body.classList.contains('fullscreen-3d-active')) {
+                this.exit3DFullscreen();
+            }
+        });
 
         // Clear logs button triggers modal popup
         const btnClearLogs = document.getElementById('btn-clear-logs');
@@ -2005,9 +2151,13 @@ class AppController {
             });
         }
 
-        // Global ESC key to close any active modal
+        // Global ESC key to close any active modal or exit 3D fullscreen
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                if (document.body.classList.contains('fullscreen-3d-active')) {
+                    this.exit3DFullscreen();
+                    return;
+                }
                 this.closeClearLogsModal();
                 this.closeDeleteAgentModal();
                 this.closeCreateAgentModal();
@@ -2018,6 +2168,92 @@ class AppController {
                 this.closeTaskResultModal();
             }
         });
+    }
+
+    // ==========================================
+    // 3D FULLSCREEN FOCUS MODE
+    // ==========================================
+
+    toggleAutorotate() {
+        if (this.office3D) {
+            const isRotating = this.office3D.toggleAutoRotate();
+            const btnAutoRotate = document.getElementById('btn-toggle-autorotate');
+            if (btnAutoRotate) {
+                btnAutoRotate.classList.toggle('text-blue-600', isRotating);
+                btnAutoRotate.classList.toggle('dark:text-cyan-400', isRotating);
+            }
+        }
+    }
+
+    resetCamera() {
+        if (this.office3D) {
+            this.office3D.resetCamera();
+        }
+    }
+
+    zoomIn() {
+        if (this.office3D) {
+            this.office3D.zoomIn();
+        }
+    }
+
+    zoomOut() {
+        if (this.office3D) {
+            this.office3D.zoomOut();
+        }
+    }
+
+    enter3DFullscreen() {
+        document.body.classList.add('fullscreen-3d-active');
+        const floatingBar = document.getElementById('fullscreen-3d-floating-controls');
+        if (floatingBar) {
+            floatingBar.classList.remove('hidden');
+            floatingBar.classList.add('flex');
+        }
+
+        // Request browser native fullscreen if available
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        }
+
+        // Smoothly resize 3D viewport
+        setTimeout(() => {
+            if (this.office3D && typeof this.office3D.onResize === 'function') {
+                this.office3D.onResize();
+            }
+            window.dispatchEvent(new Event('resize'));
+        }, 60);
+
+        this.showToast('Mode Fokus 3D Office Aktif. Tekan ESC untuk keluar.', 'info');
+    }
+
+    exit3DFullscreen() {
+        document.body.classList.remove('fullscreen-3d-active');
+        const floatingBar = document.getElementById('fullscreen-3d-floating-controls');
+        if (floatingBar) {
+            floatingBar.classList.add('hidden');
+            floatingBar.classList.remove('flex');
+        }
+
+        if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+        }
+
+        // Smoothly restore 3D viewport
+        setTimeout(() => {
+            if (this.office3D && typeof this.office3D.onResize === 'function') {
+                this.office3D.onResize();
+            }
+            window.dispatchEvent(new Event('resize'));
+        }, 60);
+    }
+
+    toggle3DFullscreen() {
+        if (document.body.classList.contains('fullscreen-3d-active')) {
+            this.exit3DFullscreen();
+        } else {
+            this.enter3DFullscreen();
+        }
     }
 
     // ==========================================
@@ -2391,6 +2627,7 @@ class AppController {
     }
 
     async viewTaskAIResult(taskId) {
+        this.currentViewingTaskId = taskId;
         try {
             const res = await fetch(`api/execute_ai.php?task_id=${taskId}`);
             const data = await res.json();

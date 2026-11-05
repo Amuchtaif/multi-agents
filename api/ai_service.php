@@ -428,7 +428,11 @@ class AIService {
         }
 
         // 2. Determine Agent
-        $agentId = $forceAgentId ?: ($task['assigned_agent_id'] ?: 1);
+        $agentId = $forceAgentId ?: $task['assigned_agent_id'];
+        if (!$agentId) {
+            $firstAgent = $pdo->query("SELECT id FROM agents ORDER BY id ASC LIMIT 1")->fetchColumn();
+            $agentId = $firstAgent ? (int)$firstAgent : null;
+        }
         $agentStmt = $pdo->prepare("
             SELECT a.*, c.functions_json 
             FROM agents a 
@@ -507,7 +511,21 @@ class AIService {
             $userPrompt .= "Target Direktori Proyek Lokal: {$workingDir}\n" .
                 "PENTING: Tuliskan kode lengkap menggunakan format `### File: <path/relatif>` atau `write_file: <path/relatif>` diikuti codeblock agar file langsung ditulis secara fisik ke dalam folder proyek lokal tersebut.\n";
         }
+
+        if (!empty($task['revision_notes'])) {
+            $userPrompt .= "\n\n⚠️ CATATAN REVISI DARI OWNER:\n" .
+                "Owner telah mereview draf sebelumnya dan meminta perbaikan berikut:\n" .
+                "\"{$task['revision_notes']}\"\n" .
+                "Harap perbaiki dan sesuaikan implementasi berdasarkan catatan revisi di atas.\n";
+        }
+
         $userPrompt .= "Lakukan analisis dan selesaikan tugas ini sekarang.";
+
+        // Inject Company Knowledge Base context if available
+        $kbContext = self::getKnowledgeBaseContext($pdo, $task['title']);
+        if (!empty($kbContext)) {
+            $systemInstruction = $kbContext . "\n\n" . $systemInstruction;
+        }
 
         $startTime = microtime(true);
 
@@ -630,16 +648,39 @@ class AIService {
         ");
         $updTaskDone->execute([$finalResultText, $taskId]);
 
-        // 11. Update Agent Metrics
+        // 11. Update Agent Metrics & Check Next Status
+        $activeTaskCountStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM tasks 
+            WHERE assigned_agent_id = ? AND status = 'in_progress' AND id != ?
+        ");
+        $activeTaskCountStmt->execute([$agentId, $taskId]);
+        $hasMoreWork = ((int)$activeTaskCountStmt->fetchColumn()) > 0;
+
+        $nextStatus = $hasMoreWork ? 'KERJA' : 'IDLE';
+        $taskSummary = $hasMoreWork 
+            ? "Mengerjakan tugas berikutnya" 
+            : "Standby (Tugas selesai)";
+
         $updAgent = $pdo->prepare("
             UPDATE agents 
             SET token_usage = token_usage + ?, 
                 action_count = action_count + 1, 
-                current_task = CONCAT('Selesai: ', ?), 
-                status = 'KERJA' 
+                current_task = ?, 
+                status = ?,
+                updated_at = NOW()
             WHERE id = ?
         ");
-        $updAgent->execute([$totalTokens, mb_substr($task['title'], 0, 30), $agentId]);
+        $updAgent->execute([$totalTokens, $taskSummary, $nextStatus, $agentId]);
+
+        // If no more active tasks, log clean transition to IDLE / Lounge
+        if (!$hasMoreWork) {
+            $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'system', ?, ?)")
+                ->execute([
+                    $agentId,
+                    "☕ Agent {$agent['name']} telah menyelesaikan tugas #{$taskId} ('{$task['title']}') dan beralih ke status IDLE / Standby di Lounge.",
+                    json_encode(['task_id' => $taskId, 'status' => 'IDLE', 'location' => 'lounge'], JSON_UNESCAPED_UNICODE)
+                ]);
+        }
 
         return [
             'success' => true,
@@ -770,9 +811,24 @@ class AIService {
         $pdo->prepare("UPDATE tasks SET status = 'completed', result_text = ?, updated_at = NOW() WHERE id = ?")
             ->execute([$reportMd, $taskId]);
 
-        // Update agent metrics
-        $pdo->prepare("UPDATE agents SET token_usage = token_usage + ?, action_count = action_count + 1, current_task = CONCAT('Selesai: ', ?), status = 'KERJA' WHERE id = ?")
-            ->execute([$tokens, mb_substr($task['title'], 0, 30), $agentId]);
+        // Update agent metrics & check next status
+        $activeCheckStmt = $pdo->prepare("SELECT COUNT(*) FROM tasks WHERE assigned_agent_id = ? AND status = 'in_progress' AND id != ?");
+        $activeCheckStmt->execute([$agentId, $taskId]);
+        $hasMoreWork = ((int)$activeCheckStmt->fetchColumn()) > 0;
+        $nextStatus = $hasMoreWork ? 'KERJA' : 'IDLE';
+        $taskSummary = $hasMoreWork ? "Mengerjakan tugas berikutnya" : "Standby (Tugas selesai)";
+
+        $pdo->prepare("UPDATE agents SET token_usage = token_usage + ?, action_count = action_count + 1, current_task = ?, status = ?, updated_at = NOW() WHERE id = ?")
+            ->execute([$tokens, $taskSummary, $nextStatus, $agentId]);
+
+        if (!$hasMoreWork) {
+            $pdo->prepare("INSERT INTO agent_logs (agent_id, log_type, message, details_json) VALUES (?, 'system', ?, ?)")
+                ->execute([
+                    $agentId,
+                    "☕ Agent {$agent['name']} telah menyelesaikan tugas #{$taskId} ('{$task['title']}') dan beralih ke status IDLE / Standby di Lounge.",
+                    json_encode(['task_id' => $taskId, 'status' => 'IDLE', 'location' => 'lounge'], JSON_UNESCAPED_UNICODE)
+                ]);
+        }
 
         return [
             'success' => true,
@@ -1225,6 +1281,39 @@ class AIService {
             'content' => $content,
             'usage' => $usage
         ];
+    }
+
+    /**
+     * Retrieve active Company Knowledge Base documents relevant to query/context
+     */
+    public static function getKnowledgeBaseContext(PDO $pdo, string $query = '', int $maxChars = 4000): string {
+        try {
+            $stmt = $pdo->query("SELECT id, title, category, content_text FROM knowledge_base WHERE is_active = 1 ORDER BY id DESC LIMIT 5");
+            $docs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($docs)) {
+                return '';
+            }
+
+            $context = "=== KNOWLEDGE BASE PERUSAHAAN (REFERENSI RESMI KANTOR VIRTUAL) ===\n" .
+                       "Berikut adalah dokumen panduan, standar, atau SOP resmi perusahaan. Jadikan referensi utama dalam merumuskan kode, copywriting, dan analisa:\n\n";
+
+            $totalChars = 0;
+            foreach ($docs as $doc) {
+                $categoryLabel = strtoupper(str_replace('_', ' ', $doc['category']));
+                $textSnippet = mb_substr($doc['content_text'], 0, 1200);
+                $entry = "--- DOKUMEN: {$doc['title']} [KATEGORI: {$categoryLabel}] ---\n" . $textSnippet . "\n\n";
+                if ($totalChars + strlen($entry) > $maxChars) {
+                    break;
+                }
+                $context .= $entry;
+                $totalChars += strlen($entry);
+            }
+
+            return trim($context);
+        } catch (Exception $e) {
+            return '';
+        }
     }
 
     /**

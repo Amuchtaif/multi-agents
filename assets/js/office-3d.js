@@ -857,14 +857,26 @@ class Office3D {
     }
 
     /**
-     * Generates a 4K tech presentation screen for the meeting room
+     * Generates a tech presentation screen for the meeting room
      */
     generatePresentationScreenTexture() {
         const canvas = document.createElement('canvas');
         canvas.width = 512;
         canvas.height = 256;
         const ctx = canvas.getContext('2d');
+        this.presentationCanvas = canvas;
+        this.presentationCtx = ctx;
 
+        this.drawDefaultPresentationScreen(ctx);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
+        texture.minFilter = THREE.LinearFilter;
+        return texture;
+    }
+
+    drawDefaultPresentationScreen(ctx) {
         ctx.fillStyle = '#0a101f';
         ctx.fillRect(0, 0, 512, 256);
 
@@ -905,12 +917,90 @@ class Office3D {
             ctx.textAlign = 'center';
             ctx.fillText(n.name, n.x, n.y + 36);
         });
+    }
 
-        const texture = new THREE.CanvasTexture(canvas);
-        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
-        else if (THREE.sRGBEncoding) texture.encoding = THREE.sRGBEncoding;
-        texture.minFilter = THREE.LinearFilter;
-        return texture;
+    /**
+     * Dynamically updates the Meeting Room TV texture with live topic & discussion notes
+     */
+    updateMeetingTVScreen(title, speakerName = '', speakerRole = '', speechSnippet = '') {
+        if (!this.presentationCanvas || !this.presentationCtx) return;
+        const ctx = this.presentationCtx;
+        const w = 512, h = 256;
+
+        ctx.fillStyle = '#0a101f';
+        ctx.fillRect(0, 0, w, h);
+
+        // Top Status Header Bar
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, w, 44);
+
+        // Status Pulse Dot
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(24, 22, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 13px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        const cleanTitle = (title || 'STRATEGI TIM').toUpperCase().slice(0, 36);
+        ctx.fillText(`WAR ROOM • ${cleanTitle}`, 38, 26);
+
+        if (speakerName) {
+            // Speaker Card Box
+            ctx.fillStyle = '#1e1b4b';
+            ctx.strokeStyle = '#6366f1';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(20, 54, 472, 56, 8);
+            else ctx.rect(20, 54, 472, 56);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#a5b4fc';
+            ctx.font = 'bold 12px Inter, sans-serif';
+            ctx.fillText(`🎤 ${speakerName} (${speakerRole})`, 32, 76);
+
+            ctx.fillStyle = '#e0e7ff';
+            ctx.font = '11px Inter, sans-serif';
+            const shortSpeech = speechSnippet.slice(0, 68) + (speechSnippet.length > 68 ? '...' : '');
+            ctx.fillText(`"${shortSpeech}"`, 32, 96);
+        }
+
+        // Live Agenda / Notes Area
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(20, 120, 472, 118, 8);
+        else ctx.rect(20, 120, 472, 118);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px monospace';
+        ctx.fillText('LIVE AGENDAS & STRATEGY SYNC:', 32, 142);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText('• Multi-Agent Autonomous Deliberation Active', 32, 164);
+        ctx.fillStyle = '#34d399';
+        ctx.fillText('• Synthesizing Action Items for Backlog', 32, 184);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText('• Status: In Session (Kolaborasi Mandiri)', 32, 204);
+
+        if (this.cachedTextures.presentationScreen) {
+            this.cachedTextures.presentationScreen.needsUpdate = true;
+        }
+    }
+
+    /**
+     * Resets Meeting Room TV screen to default
+     */
+    resetMeetingTVScreen() {
+        if (!this.presentationCanvas || !this.presentationCtx) return;
+        this.drawDefaultPresentationScreen(this.presentationCtx);
+        if (this.cachedTextures.presentationScreen) {
+            this.cachedTextures.presentationScreen.needsUpdate = true;
+        }
     }
 
     // ==========================================
@@ -1861,13 +1951,27 @@ class Office3D {
             { cx: x + 1.40, cz: z + 1.36, rotY: Math.PI + 0.10 }
         ];
 
+        this.meetingSpots = chairConfigs.map((cfg, idx) => ({
+            id: `meet_chair_${idx}`,
+            name: `Kursi Konferensi #${idx + 1}`,
+            x: cfg.cx,
+            y: 0,
+            z: cfg.cz,
+            rotY: cfg.rotY,
+            taken: false,
+            agentId: null
+        }));
+
         chairConfigs.forEach(cfg => {
             this.createConferenceChair(cfg.cx, cfg.cz, cfg.rotY);
         });
 
-                // TV menempel di dinding belakang (permukaan dalam dinding z = -11.8)
+        // TV menempel di dinding belakang (permukaan dalam dinding z = -11.8)
         const tv = this.buildWallTV(3.6, 1.8);
+        tv.name = 'MeetingRoomTV';
+        tv.userData = { isMeetingTV: true, isMeetingRoom: true };
         tv.position.set(x, 2.3, -11.8 + 0.2);
+        this.meetingTV = tv;
         this.officeGroup.add(tv);
 
         // Credenza di bawah TV
@@ -3475,6 +3579,48 @@ class Office3D {
     }
 
     /**
+     * Applies attentive conference sitting posture at the War Room meeting table
+     */
+    applyMeetingSittingPose(agentUnit) {
+        const id = agentUnit.id;
+        const g = agentUnit.avatarGroup;
+
+        const spine = g.getObjectByName(`SpinePivot_${id}`);
+        const head = g.getObjectByName(`HeadPivot_${id}`);
+        const thighL = g.getObjectByName(`LeftThighPivot_${id}`);
+        const kneeL = g.getObjectByName(`LeftKneePivot_${id}`);
+        const thighR = g.getObjectByName(`RightThighPivot_${id}`);
+        const kneeR = g.getObjectByName(`RightKneePivot_${id}`);
+        const armL = g.getObjectByName(`LeftArmPivot_${id}`);
+        const elbowL = g.getObjectByName(`LeftElbowPivot_${id}`);
+        const armR = g.getObjectByName(`RightArmPivot_${id}`);
+        const elbowR = g.getObjectByName(`RightElbowPivot_${id}`);
+        const coffeeCup = g.getObjectByName(`CoffeeCup_${id}`);
+
+        g.position.y = 0.08;
+
+        if (thighL) thighL.rotation.set(-Math.PI / 2, 0, 0);
+        if (kneeL) kneeL.rotation.set(Math.PI / 2, 0, 0);
+        if (thighR) thighR.rotation.set(-Math.PI / 2, 0, 0);
+        if (kneeR) kneeR.rotation.set(Math.PI / 2, 0, 0);
+
+        if (spine) {
+            spine.rotation.set(0.04, 0, 0);
+            spine.position.set(0, 0.58, 0);
+        }
+
+        if (head) head.rotation.set(-0.05, 0, 0);
+
+        // Arms resting attentively on conference table
+        if (armL) armL.rotation.set(-0.65, 0.15, 0.05);
+        if (elbowL) elbowL.rotation.set(-0.55, 0, 0);
+        if (armR) armR.rotation.set(-0.65, -0.15, -0.05);
+        if (elbowR) elbowR.rotation.set(-0.55, 0, 0);
+
+        if (coffeeCup) coffeeCup.visible = false;
+    }
+
+    /**
      * Applies natural standing idle/interaction posture while visiting office objects
      */
     applyVisitingObjectPose(agentUnit, strollSpot) {
@@ -3640,8 +3786,8 @@ class Office3D {
         const list = [
             // Center Low Planter Credenza Divider (x: [-0.34, 0.34], z: [1.1, 4.9])
             { name: 'Planter Credenza', minX: -0.45, maxX: 0.45, minZ: 0.95, maxZ: 5.05 },
-            // Meeting Room Architectural Glass Enclosure
-            { name: 'Meeting Room', minX: -12.0, maxX: -3.4, minZ: -12.0, maxZ: -5.9 },
+            // Meeting Room Architectural Glass Enclosure (allowed if character is entering conference chair)
+            ...((!ignoreTargetId || !ignoreTargetId.startsWith('meet_chair')) ? [{ name: 'Meeting Room', minX: -12.0, maxX: -3.4, minZ: -12.0, maxZ: -5.9 }] : []),
             // Back Server Hub & Infrastructure
             { name: 'Server Racks', minX: 6.6, maxX: 9.8, minZ: -11.5, maxZ: -9.5 },
             // Coffee Bar Counter
@@ -3937,6 +4083,109 @@ class Office3D {
             nav.targetPos.copy(nav.waypoints[0]);
 
             console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) kembali ke Meja Kerja melalui koridor aman...`);
+
+        } else if (targetStatus === 'MEETING') {
+            const meetingSpot = extraTarget || this.getFreeMeetingSpot();
+            if (meetingSpot) {
+                meetingSpot.taken = true;
+                meetingSpot.agentId = id;
+                nav.meetingSpot = meetingSpot;
+                nav.state = 'WALKING_TO_MEETING';
+                nav.targetRot = meetingSpot.rotY;
+
+                const waypoints = [];
+                // 1. To central spine
+                if (curPos.z > 2.0) {
+                    waypoints.push(new THREE.Vector3(curPos.x, 0, 5.0));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.0));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                } else if (curPos.z < -2.0) {
+                    waypoints.push(new THREE.Vector3(curPos.x, 0, -4.2));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, -4.2));
+                } else {
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                }
+                // 2. To meeting room entrance doorway
+                waypoints.push(new THREE.Vector3(-3.0, 0, -5.5));
+                waypoints.push(new THREE.Vector3(-4.5, 0, -6.5));
+                // 3. To designated conference chair
+                waypoints.push(new THREE.Vector3(meetingSpot.x, 0, meetingSpot.z));
+
+                nav.waypoints = waypoints;
+                nav.waypointIndex = 0;
+                nav.targetPos.copy(waypoints[0]);
+
+                console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) berjalan ke Ruang Rapat: ${meetingSpot.name}...`);
+            }
+        }
+    }
+
+    getFreeMeetingSpot() {
+        if (!this.meetingSpots || this.meetingSpots.length === 0) return null;
+        return this.meetingSpots.find(s => !s.taken) || this.meetingSpots[0];
+    }
+
+    startTeamMeeting(agentIds, topic) {
+        if (!this.webglAvailable) return;
+        this.updateMeetingTVScreen(topic);
+        this.focusMeetingRoom();
+
+        agentIds.forEach(id => {
+            const agentUnit = this.agents.get(Number(id));
+            if (agentUnit) {
+                const freeSpot = this.getFreeMeetingSpot();
+                if (freeSpot) {
+                    this.startAgentLocomotion(agentUnit, 'MEETING', freeSpot);
+                }
+            }
+        });
+    }
+
+    endTeamMeeting() {
+        if (!this.webglAvailable) return;
+        if (this.meetingSpots) {
+            this.meetingSpots.forEach(s => { s.taken = false; s.agentId = null; });
+        }
+        this.resetMeetingTVScreen();
+        for (const [id, agentUnit] of this.agents.entries()) {
+            const nav = agentUnit.navigation;
+            if (nav && (nav.state === 'IN_MEETING' || nav.state === 'WALKING_TO_MEETING')) {
+                nav.meetingSpot = null;
+                this.startAgentLocomotion(agentUnit, 'KERJA');
+            }
+        }
+    }
+
+    focusMeetingRoom() {
+        if (!this.webglAvailable) return;
+        this.targetLookAt.set(-7.5, 1.8, -8.75);
+    }
+
+    interactWithCat() {
+        const cat = this.officeGroup ? this.officeGroup.getObjectByName('OfficeMascotCat') : null;
+        if (!cat) return;
+
+        const startY = cat.position.y;
+        let t = 0;
+        const jumpAnim = () => {
+            t += 0.08;
+            cat.position.y = startY + Math.sin(t * Math.PI) * 0.45;
+            cat.rotation.y += 0.15;
+            if (t < 1.0) {
+                requestAnimationFrame(jumpAnim);
+            } else {
+                cat.position.y = startY;
+                cat.rotation.y = -Math.PI / 4;
+            }
+        };
+        jumpAnim();
+
+        if (window.officeAudio && typeof window.officeAudio.playMeow === 'function') {
+            window.officeAudio.playMeow();
+        }
+
+        if (window.app && typeof window.app.showToast === 'function') {
+            window.app.showToast('🐱 Meow! Si Belang (Mascot Kucing HQ) mengeong gembira!', 'info');
         }
     }
 
@@ -4202,6 +4451,23 @@ class Office3D {
                     const agentId = hit.object.userData.parentAgentId;
                     this.selectAgent(agentId);
                     return;
+                }
+
+                // Check for Mascot Cat or Meeting Room / TV click
+                let p = hit.object;
+                while (p) {
+                    if (p.name === 'OfficeMascotCat' || (p.userData && p.userData.isCat)) {
+                        this.interactWithCat();
+                        return;
+                    }
+                    if (p.name === 'MeetingRoomTV' || (p.userData && (p.userData.isMeetingTV || p.userData.isMeetingRoom))) {
+                        this.focusMeetingRoom();
+                        if (window.app && typeof window.app.openWarRoomModal === 'function') {
+                            window.app.openWarRoomModal();
+                        }
+                        return;
+                    }
+                    p = p.parent;
                 }
             }
         });
