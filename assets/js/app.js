@@ -1118,7 +1118,7 @@ class AppController {
             } else if (isWorking) {
                 locEl.innerHTML = `<span class="text-emerald-600 dark:text-emerald-400 font-medium"><i class="fa-solid fa-laptop-code mr-1"></i> Sedang di Stasiun Meja Kerja</span>`;
             } else {
-                locEl.innerHTML = `<span class="text-slate-500 font-medium"><i class="fa-solid fa-pause mr-1"></i> Ditangguhkan di Meja</span>`;
+                locEl.innerHTML = `<span class="text-amber-500 font-medium"><i class="fa-solid fa-couch mr-1"></i> Sofa Lounge (Dijeda / PAUSED)</span>`;
             }
         }
 
@@ -1528,14 +1528,99 @@ class AppController {
         }
     }
 
+    initDepartmentSelect() {
+        const select = document.getElementById('agent-department-select');
+        const customOptgroup = document.getElementById('optgroup-custom-departments');
+        if (!select || !customOptgroup) return;
+
+        customOptgroup.innerHTML = '';
+        let customDepts = [];
+        try {
+            const raw = localStorage.getItem('multiagent_custom_departments');
+            if (raw) customDepts = JSON.parse(raw);
+        } catch (e) {
+            console.warn('Failed to parse custom departments from localStorage', e);
+        }
+
+        if (Array.isArray(customDepts) && customDepts.length > 0) {
+            customOptgroup.style.display = '';
+            customDepts.forEach(dept => {
+                const opt = document.createElement('option');
+                opt.value = dept;
+                opt.textContent = dept;
+                customOptgroup.appendChild(opt);
+            });
+        } else {
+            customOptgroup.style.display = 'none';
+        }
+    }
+
+    showNewDepartmentInput() {
+        const select = document.getElementById('agent-department-select');
+        const container = document.getElementById('custom-department-container');
+        const input = document.getElementById('custom-department-input');
+        if (select && select.value !== '__new__') {
+            this.previousDepartmentValue = select.value;
+            select.value = '__new__';
+        }
+        if (container) container.classList.remove('hidden');
+        if (input) {
+            input.focus();
+        }
+    }
+
+    cancelNewDepartmentInput() {
+        const select = document.getElementById('agent-department-select');
+        const container = document.getElementById('custom-department-container');
+        const input = document.getElementById('custom-department-input');
+        if (container) container.classList.add('hidden');
+        if (input) input.value = '';
+        if (select) {
+            select.value = this.previousDepartmentValue || 'Spesialis Media Sosial';
+        }
+    }
+
+    handleDepartmentChange(val) {
+        if (val === '__new__') {
+            this.showNewDepartmentInput();
+        } else {
+            const container = document.getElementById('custom-department-container');
+            if (container) container.classList.add('hidden');
+            this.previousDepartmentValue = val;
+        }
+    }
+
+    saveCustomDepartment(deptName) {
+        if (!deptName || typeof deptName !== 'string') return;
+        const cleanDept = deptName.trim();
+        if (!cleanDept) return;
+
+        let customDepts = [];
+        try {
+            const raw = localStorage.getItem('multiagent_custom_departments');
+            if (raw) customDepts = JSON.parse(raw);
+        } catch (e) {}
+
+        if (!Array.isArray(customDepts)) customDepts = [];
+        if (!customDepts.includes(cleanDept)) {
+            customDepts.push(cleanDept);
+            try {
+                localStorage.setItem('multiagent_custom_departments', JSON.stringify(customDepts));
+            } catch (e) {}
+        }
+        this.initDepartmentSelect();
+    }
+
     openCreateAgentModal() {
         const modal = document.getElementById('modal-create-agent');
         if (!modal) return;
         modal.classList.remove('hidden');
 
-        document.getElementById('form-create-agent').reset();
+                document.getElementById('form-create-agent').reset();
         document.getElementById('temp-slider-val').textContent = '0.7';
         this.populateLocalProjectsDatalist();
+        this.initDepartmentSelect();
+        this.cancelNewDepartmentInput();
     }
 
     closeCreateAgentModal() {
@@ -1546,10 +1631,24 @@ class AppController {
     async handleCreateAgentSubmit(e) {
         e.preventDefault();
 
-        const form = e.target;
+                const form = e.target;
         const name = form.name.value.trim();
         const role = form.role.value.trim();
-        const department = form.department.value;
+        const gender = form.gender ? form.gender.value : 'male';
+
+        let department = form.department.value;
+        const customContainer = document.getElementById('custom-department-container');
+        const customInput = document.getElementById('custom-department-input');
+        if (department === '__new__' || (customContainer && !customContainer.classList.contains('hidden'))) {
+            const customVal = customInput ? customInput.value.trim() : '';
+            if (!customVal) {
+                alert('Silakan masukkan nama departemen baru terlebih dahulu!');
+                if (customInput) customInput.focus();
+                return;
+            }
+            department = customVal;
+            this.saveCustomDepartment(customVal);
+        }
         const workingDirectory = form.working_directory ? form.working_directory.value.trim() : '';
         const model = form.model.value;
         const temperature = parseFloat(form.temperature.value);
@@ -1578,9 +1677,10 @@ class AppController {
             funcs.push(cb.value);
         });
 
-        const payload = {
+                const payload = {
             name,
             role,
+            gender,
             department,
             working_directory: workingDirectory,
             model,

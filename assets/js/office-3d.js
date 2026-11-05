@@ -114,6 +114,7 @@ class Office3D {
         // Cached Procedural Textures & Materials
         this.cachedTextures = {};
         this.sofaMaterials = [];
+        this.conferenceChairMaterials = [];
 
         this.init();
     }
@@ -317,7 +318,7 @@ class Office3D {
 
         agentList.forEach(agent => {
             const isSelected = this.selectedAgentId == agent.id;
-            const isIdle = agent.status === 'IDLE';
+            const isIdle = agent.status === 'IDLE' || agent.status === 'PAUSED';
             const isKerja = agent.status === 'KERJA';
             if (isIdle) idleCount++;
             if (isKerja) kerjaCount++;
@@ -1100,7 +1101,8 @@ class Office3D {
         this.officeGroup.add(floor);
 
         // Overhead White Architectural Beams & Forest Green Pendant Dome Lamps
-        this.buildOverheadBeams();
+        // Overhead beams removed per user request
+        // this.buildOverheadBeams();
 
         // Center Low Planter Credenza Divider (Dividing bottom workstation zones)
         this.buildCenterPlanterCredenza();
@@ -1211,17 +1213,7 @@ class Office3D {
     }
 
         buildOverheadBeams() {
-        const isLight = this.currentTheme === 'light';
-        const beamMat = new THREE.MeshStandardMaterial({
-            color: isLight ? PALETTE.trim : 0x334155,
-            roughness: 0.5
-        });
-        [-3.8, 3.8].forEach(bz => {
-            const beam = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.24, 0.24), beamMat);
-            beam.position.set(0, 4.1, bz);
-            beam.castShadow = false; // hindari garis bayangan di lantai
-            this.officeGroup.add(beam);
-        });
+        // Overhead beam bars removed as requested by user
     }
 
     buildWindow3D(W = 4.2, H = 2.3) {
@@ -1580,17 +1572,29 @@ class Office3D {
             target: new THREE.Vector3(3.2, 0, 1.8),
             targetRot: -Math.PI / 4,
             waypoints: [
-                new THREE.Vector3(3.2, 0, 1.8),   // near planter & lounge
-                new THREE.Vector3(3.8, 0, 6.2),   // lounge rug by coffee table
-                new THREE.Vector3(0.0, 0, 5.0),   // lounge hallway threshold
-                new THREE.Vector3(0.0, 0, 1.0),   // central walkway
-                new THREE.Vector3(-3.5, 0, 1.0),  // walkway left section
-                new THREE.Vector3(-4.5, 0, -4.5), // near meeting room entrance
-                new THREE.Vector3(-1.0, 0, -4.0), // back hallway
-                new THREE.Vector3(0.0, 0, -1.0),  // hallway middle
-                new THREE.Vector3(3.0, 0, -1.0),  // near right desk
-                new THREE.Vector3(7.5, 0, 4.5),   // near coffee bar counter
-                new THREE.Vector3(5.5, 0, 6.5)    // coffee lounge transition
+                new THREE.Vector3(0.0, 0, 0.0),    // Central Walkway center
+                new THREE.Vector3(4.5, 0, 0.0),    // Central Walkway east
+                new THREE.Vector3(6.6, 0, 0.0),    // East corridor entry
+                new THREE.Vector3(6.6, 0, 4.2),    // East corridor mid
+                new THREE.Vector3(7.8, 0, 4.2),    // Near coffee counter & stools
+                new THREE.Vector3(6.6, 0, 4.2),    // East corridor mid
+                new THREE.Vector3(6.6, 0, 0.0),    // East corridor top
+                new THREE.Vector3(6.6, 0, -4.2),   // Back corridor east
+                new THREE.Vector3(1.5, 0, -4.2),   // Back corridor mid
+                new THREE.Vector3(0.0, 0, -4.2),   // Back corridor center
+                new THREE.Vector3(-3.0, 0, -4.2),  // Back corridor west
+                new THREE.Vector3(-3.0, 0, 0.0),   // Central walkway west
+                new THREE.Vector3(-3.0, 0, 5.3),   // West lounge transit aisle
+                new THREE.Vector3(0.0, 0, 5.3),    // Lounge threshold
+                new THREE.Vector3(2.45, 0, 5.3),   // Lounge west seating entry
+                new THREE.Vector3(2.45, 0, 7.2),   // In front of left armchair
+                new THREE.Vector3(2.45, 0, 7.95),  // Lounge rug corner
+                new THREE.Vector3(3.8, 0, 7.95),   // In front of main sofa
+                new THREE.Vector3(2.45, 0, 7.95),  // Lounge rug corner
+                new THREE.Vector3(2.45, 0, 5.3),   // Lounge west seating entry
+                new THREE.Vector3(0.0, 0, 5.3),    // Lounge threshold
+                new THREE.Vector3(-3.0, 0, 5.3),   // West lounge transit aisle
+                new THREE.Vector3(-3.0, 0, 0.0)    // Central walkway west
             ],
             targetIndex: 0
         };
@@ -1610,6 +1614,20 @@ class Office3D {
         const tailMid = cat.getObjectByName('CatTailMid');
         const tailTip = cat.getObjectByName('CatTailTip');
 
+        // Check distance to all walking or nearby agents
+        let minAgentDist = Infinity;
+        let closestAgent = null;
+        if (this.agents) {
+            this.agents.forEach(agentUnit => {
+                const aPos = agentUnit.avatarGroup.position;
+                const d = Math.hypot(cat.position.x - aPos.x, cat.position.z - aPos.z);
+                if (d < minAgentDist) {
+                    minAgentDist = d;
+                    closestAgent = agentUnit;
+                }
+            });
+        }
+
         if (state.state === 'RESTING') {
             state.restTimer -= delta;
 
@@ -1621,9 +1639,15 @@ class Office3D {
 
             // Head curious look around & slight nod
             if (head) {
-                head.rotation.y = Math.sin(elapsedTime * 0.9) * 0.30;
-                head.rotation.x = 0.04 + Math.sin(elapsedTime * 1.6) * 0.04;
-                head.rotation.z = Math.sin(elapsedTime * 0.7) * 0.08;
+                if (minAgentDist < 1.4 && closestAgent) {
+                    // Look up at nearby human
+                    head.rotation.x = 0.28;
+                    head.rotation.y = Math.sin(elapsedTime * 1.5) * 0.20;
+                } else {
+                    head.rotation.y = Math.sin(elapsedTime * 0.9) * 0.30;
+                    head.rotation.x = 0.04 + Math.sin(elapsedTime * 1.6) * 0.04;
+                    head.rotation.z = Math.sin(elapsedTime * 0.7) * 0.08;
+                }
             }
 
             // Neutral resting legs
@@ -1633,12 +1657,24 @@ class Office3D {
             if (this.catLegBR) this.catLegBR.rotation.x = 0;
 
             if (state.restTimer <= 0) {
-                state.targetIndex = (state.targetIndex + 1 + Math.floor(Math.random() * 2)) % state.waypoints.length;
+                state.targetIndex = (state.targetIndex + 1) % state.waypoints.length;
                 state.target.copy(state.waypoints[state.targetIndex]);
                 state.state = 'WALKING';
             }
         } else if (state.state === 'WALKING') {
             const curPos = cat.position;
+
+            // If an agent is very close (< 0.65m), pause and look up politely
+            if (minAgentDist < 0.65) {
+                if (head) {
+                    head.rotation.x = 0.32;
+                    head.rotation.y = Math.sin(elapsedTime * 3.0) * 0.15;
+                }
+                if (tailMid) tailMid.rotation.y = Math.sin(elapsedTime * 4.5) * 0.40;
+                curPos.y = 0;
+                return; // Wait for agent to pass safely
+            }
+
             const dx = state.target.x - curPos.x;
             const dz = state.target.z - curPos.z;
             const dist = Math.hypot(dx, dz);
@@ -1651,38 +1687,77 @@ class Office3D {
                 while (diff > Math.PI) diff -= Math.PI * 2;
                 cat.rotation.y += diff * Math.min(delta * 5.0, 1.0);
 
-                // Move forward with natural feline walk speed
-                const speed = 1.35; // units/sec
+                // Natural feline walk speed, slow down if agent nearby
+                let speed = 1.35;
+                if (minAgentDist < 1.3) speed *= 0.65;
+
                 const step = Math.min(dist, speed * delta);
-                curPos.x += (dx / dist) * step;
-                curPos.z += (dz / dist) * step;
+                let moveX = (dx / dist) * step;
+                let moveZ = (dz / dist) * step;
 
-                // 4-beat trot gait animation
-                state.walkPhase += delta * 9.5;
-                const p = state.walkPhase;
+                // Nudge laterally away from approaching agent
+                if (minAgentDist < 1.3 && closestAgent) {
+                    const aPos = closestAgent.avatarGroup.position;
+                    const steerX = (curPos.x - aPos.x) / minAgentDist;
+                    const steerZ = (curPos.z - aPos.z) / minAgentDist;
+                    const steerForce = (1.3 - minAgentDist) * 0.6 * delta;
+                    moveX += steerX * steerForce;
+                    moveZ += steerZ * steerForce;
+                }
 
-                if (this.catLegFL) this.catLegFL.rotation.x = Math.sin(p) * 0.42;
-                if (this.catLegFR) this.catLegFR.rotation.x = -Math.sin(p) * 0.42;
-                if (this.catLegBL) this.catLegBL.rotation.x = -Math.sin(p + 0.6) * 0.42;
-                if (this.catLegBR) this.catLegBR.rotation.x = Math.sin(p + 0.6) * 0.42;
+                const prevCatX = curPos.x;
+                const prevCatZ = curPos.z;
 
-                // Subtle body sway & vertical step bob
-                curPos.y = Math.abs(Math.sin(p * 2)) * 0.025;
+                // Continuous obstacle collision resolver with whisker evasion
+                const resolved = this.resolveObstacleCollision(curPos, moveX, moveZ, 0.20);
+                curPos.x = resolved.x;
+                curPos.z = resolved.z;
 
-                // Tail held upright & swaying in rhythm
-                if (tailRoot) tailRoot.rotation.x = -0.4;
-                if (tailMid) tailMid.rotation.y = Math.sin(p) * 0.32;
-                if (tailTip) tailTip.rotation.y = Math.sin(p - 0.5) * 0.38;
+                const catMoved = Math.hypot(curPos.x - prevCatX, curPos.z - prevCatZ);
+                if (catMoved > 0.001) {
+                    state.stuckTimer = 0;
+                    // 4-beat trot gait animation
+                    state.walkPhase += delta * 9.5;
+                    const p = state.walkPhase;
 
-                if (head) {
-                    head.rotation.x = Math.sin(p * 2) * 0.04;
-                    head.rotation.y = 0;
-                    head.rotation.z = Math.sin(p) * 0.05;
+                    if (this.catLegFL) this.catLegFL.rotation.x = Math.sin(p) * 0.42;
+                    if (this.catLegFR) this.catLegFR.rotation.x = -Math.sin(p) * 0.42;
+                    if (this.catLegBL) this.catLegBL.rotation.x = -Math.sin(p + 0.6) * 0.42;
+                    if (this.catLegBR) this.catLegBR.rotation.x = Math.sin(p + 0.6) * 0.42;
+
+                    // Subtle body sway & vertical step bob
+                    curPos.y = Math.abs(Math.sin(p * 2)) * 0.025;
+
+                    // Tail held upright & swaying in rhythm
+                    if (tailRoot) tailRoot.rotation.x = -0.4;
+                    if (tailMid) tailMid.rotation.y = Math.sin(p) * 0.32;
+                    if (tailTip) tailTip.rotation.y = Math.sin(p - 0.5) * 0.38;
+
+                    if (head) {
+                        head.rotation.x = Math.sin(p * 2) * 0.04;
+                        head.rotation.y = 0;
+                        head.rotation.z = Math.sin(p) * 0.05;
+                    }
+                } else {
+                    // Do NOT trot in place when obstructed
+                    curPos.y = 0;
+                    if (this.catLegFL) this.catLegFL.rotation.x = 0;
+                    if (this.catLegFR) this.catLegFR.rotation.x = 0;
+                    if (this.catLegBL) this.catLegBL.rotation.x = 0;
+                    if (this.catLegBR) this.catLegBR.rotation.x = 0;
+
+                    state.stuckTimer = (state.stuckTimer || 0) + delta;
+                    if (state.stuckTimer > 1.0) {
+                        // Cat mencari jalan keluar: switch to next waypoint!
+                        state.targetIndex = (state.targetIndex + 1) % state.waypoints.length;
+                        state.target.copy(state.waypoints[state.targetIndex]);
+                        state.stuckTimer = 0;
+                    }
                 }
             } else {
                 // Reached destination, sit and rest
                 state.state = 'RESTING';
-                state.restTimer = 4.0 + Math.random() * 5.0; // rest 4 - 9 seconds
+                state.restTimer = 3.5 + Math.random() * 4.0; // rest 3.5 - 7.5 seconds
                 curPos.y = 0;
             }
         }
@@ -1745,24 +1820,50 @@ class Office3D {
         tableTop.position.set(x, 1.1, z);
         tableTop.castShadow = true;
         tableTop.receiveShadow = true;
+        this.meetingTableTop = tableTop;
         this.officeGroup.add(tableTop);
 
-        const tableLeg = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.2, 0.3, 1.1, 16),
-            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.35 })
-        );
-        tableLeg.position.set(x, 0.55, z);
-        tableLeg.castShadow = true;
-        this.officeGroup.add(tableLeg);
+        // Twin architectural pedestals for wide executive conference table
+        const tableLegMat = new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.35 });
+        [-1.2, 1.2].forEach(xOffset => {
+            const legColumn = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.26, 1.05, 24), tableLegMat);
+            legColumn.position.set(x + xOffset, 0.55, z);
+            legColumn.castShadow = true;
+            this.officeGroup.add(legColumn);
 
-        // Conference Chairs
-        const chairCount = 4;
-        for (let i = 0; i < chairCount; i++) {
-            const angle = (i / chairCount) * Math.PI * 2;
-            const cx = x + Math.cos(angle) * 1.8;
-            const cz = z + Math.sin(angle) * 1.2;
-            this.createSimpleChair(cx, cz, angle + Math.PI);
-        }
+            const basePlate = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.46, 0.04, 24), tableLegMat);
+            basePlate.position.set(x + xOffset, 0.02, z);
+            basePlate.receiveShadow = true;
+            this.officeGroup.add(basePlate);
+        });
+
+        // Center flush cable management grommet box
+        const grommet = new THREE.Mesh(
+            new THREE.BoxGeometry(0.65, 0.015, 0.20),
+            new THREE.MeshStandardMaterial({ color: 0x22262d, metalness: 0.8, roughness: 0.3 })
+        );
+        grommet.position.set(x, 1.155, z);
+        this.officeGroup.add(grommet);
+
+        // Executive Conference Chairs (8 ergonomic chairs neatly arranged around the oval table)
+        // Correct clearance: no clipping into table top or legs, with natural inward orientation
+        const chairConfigs = [
+            // Head chairs (West & East ends)
+            { cx: x - 2.70, cz: z,        rotY: Math.PI / 2 },
+            { cx: x + 2.70, cz: z,        rotY: -Math.PI / 2 },
+            // North chairs (Back side facing South towards table center)
+            { cx: x - 1.40, cz: z - 1.36, rotY: 0.10 },
+            { cx: x,        cz: z - 1.58, rotY: 0.00 },
+            { cx: x + 1.40, cz: z - 1.36, rotY: -0.10 },
+            // South chairs (Front side facing North towards TV & table center)
+            { cx: x - 1.40, cz: z + 1.36, rotY: Math.PI - 0.10 },
+            { cx: x,        cz: z + 1.58, rotY: Math.PI },
+            { cx: x + 1.40, cz: z + 1.36, rotY: Math.PI + 0.10 }
+        ];
+
+        chairConfigs.forEach(cfg => {
+            this.createConferenceChair(cfg.cx, cfg.cz, cfg.rotY);
+        });
 
                 // TV menempel di dinding belakang (permukaan dalam dinding z = -11.8)
         const tv = this.buildWallTV(3.6, 1.8);
@@ -2021,36 +2122,154 @@ class Office3D {
         }
     }
 
+    /**
+     * Legacy compatibility wrapper for createConferenceChair
+     */
     createSimpleChair(x, z, rotationY) {
+        return this.createConferenceChair(x, z, rotationY);
+    }
+
+    /**
+     * Builds an executive conference chair with ergonomic upholstery,
+     * 5-star spider caster base, contoured backrest, chrome accents, and cantilever armrests.
+     */
+    createConferenceChair(x, z, rotationY) {
         const isLight = this.currentTheme === 'light';
         const chair = new THREE.Group();
         chair.position.set(x, 0, z);
         chair.rotation.y = rotationY;
 
-        const seat = new THREE.Mesh(
-            new THREE.BoxGeometry(0.65, 0.1, 0.65),
-            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.sofa[1] : 0x334155, roughness: 0.6 }) // 0xb8c9b5
-        );
-        seat.position.y = 0.55;
-        seat.castShadow = true;
-        chair.add(seat);
+        // Executive upholstery: deep charcoal leather
+        const leatherColor = isLight ? 0x2d343c : 0x222834;
+        const leatherMat = new THREE.MeshStandardMaterial({
+            color: leatherColor,
+            roughness: 0.55,
+            metalness: 0.1
+        });
 
-        const back = new THREE.Mesh(
-            new THREE.BoxGeometry(0.65, 0.6, 0.1),
-            new THREE.MeshStandardMaterial({ color: isLight ? PALETTE.sofa[1] : 0x475569, roughness: 0.6 })
-        );
-        back.position.set(0, 0.85, -0.28);
-        back.castShadow = true;
-        chair.add(back);
+        // Polished architectural chrome metal
+        const chromeMat = new THREE.MeshStandardMaterial({
+            color: isLight ? 0xd0d5dd : 0x94a3b8,
+            metalness: 0.85,
+            roughness: 0.22
+        });
 
-        const stem = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.06, 0.06, 0.55, 12),
-            new THREE.MeshStandardMaterial({ color: PALETTE.dark, metalness: 0.7, roughness: 0.35 }) // 0x2f3a4b avoids pure black
-        );
-        stem.position.y = 0.28;
-        chair.add(stem);
+        // Matte structural dark metal
+        const darkMetalMat = new THREE.MeshStandardMaterial({
+            color: 0x1e242d,
+            metalness: 0.6,
+            roughness: 0.4
+        });
+
+        // 1. Five-Star Spider Base with Casters
+        const baseGroup = new THREE.Group();
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.05, 16), chromeMat);
+        hub.position.y = 0.10;
+        baseGroup.add(hub);
+
+        const legRadius = 0.32;
+        const numProngs = 5;
+        const casterGeom = new THREE.CylinderGeometry(0.024, 0.024, 0.035, 10);
+        casterGeom.rotateX(Math.PI / 2);
+
+        for (let i = 0; i < numProngs; i++) {
+            const legAngle = (i / numProngs) * Math.PI * 2;
+            const cosA = Math.cos(legAngle);
+            const sinA = Math.sin(legAngle);
+
+            // Spider leg spoke
+            const legBar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.022, legRadius), chromeMat);
+            legBar.position.set(cosA * (legRadius / 2), 0.08, sinA * (legRadius / 2));
+            legBar.rotation.y = -legAngle + Math.PI / 2;
+            baseGroup.add(legBar);
+
+            // Caster wheel housing
+            const casterWheel = new THREE.Mesh(casterGeom, darkMetalMat);
+            casterWheel.position.set(cosA * legRadius, 0.04, sinA * legRadius);
+            baseGroup.add(casterWheel);
+        }
+        chair.add(baseGroup);
+
+        // 2. Hydraulic Gas-Lift Column & Under-seat Mechanism
+        const liftPiston = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.032, 0.42, 16), chromeMat);
+        liftPiston.position.y = 0.32;
+        chair.add(liftPiston);
+
+        const pistonShroud = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.046, 0.18, 16), darkMetalMat);
+        pistonShroud.position.y = 0.20;
+        chair.add(pistonShroud);
+
+        const mechBox = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.28), darkMetalMat);
+        mechBox.position.set(0, 0.54, -0.02);
+        chair.add(mechBox);
+
+        const tensionKnob = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.06, 12), darkMetalMat);
+        tensionKnob.position.set(0, 0.49, 0.04);
+        chair.add(tensionKnob);
+
+        // 3. Ergonomic Contoured Seat Cushion
+        const seatCushion = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.09, 0.60), leatherMat);
+        seatCushion.position.set(0, 0.615, 0.0);
+        seatCushion.castShadow = true;
+        seatCushion.receiveShadow = true;
+        chair.add(seatCushion);
+
+        // Waterfall edge roll at front of seat (comfortable thigh contour)
+        const waterfallRoll = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.64, 16), leatherMat);
+        waterfallRoll.rotation.z = Math.PI / 2;
+        waterfallRoll.position.set(0, 0.605, 0.30);
+        waterfallRoll.castShadow = true;
+        chair.add(waterfallRoll);
+
+        // 4. Ergonomic Backrest with Lumbar & Executive Headrest
+        const backGroup = new THREE.Group();
+        backGroup.position.set(0, 0.62, -0.28);
+        backGroup.rotation.x = -0.08; // subtle executive posture tilt
+
+        // Lower lumbar cushion
+        const lumbarCushion = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.32, 0.07), leatherMat);
+        lumbarCushion.position.set(0, 0.20, 0.0);
+        lumbarCushion.castShadow = true;
+        backGroup.add(lumbarCushion);
+
+        // Upper backrest
+        const upperBack = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.36, 0.06), leatherMat);
+        upperBack.position.set(0, 0.52, -0.02);
+        upperBack.castShadow = true;
+        backGroup.add(upperBack);
+
+        // Chrome top edge accent
+        const frameTop = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.03, 0.03), chromeMat);
+        frameTop.position.set(0, 0.70, -0.03);
+        backGroup.add(frameTop);
+
+        // Chrome structural spine at rear
+        const spine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.62, 0.04), chromeMat);
+        spine.position.set(0, 0.33, -0.05);
+        backGroup.add(spine);
+
+        chair.add(backGroup);
+
+        // 5. Modern Cantilever Armrests (Left & Right)
+        const armRestGeom = new THREE.BoxGeometry(0.065, 0.03, 0.30);
+        const armStrutGeom = new THREE.CylinderGeometry(0.016, 0.016, 0.30, 12);
+
+        [-0.33, 0.33].forEach(armX => {
+            const strut = new THREE.Mesh(armStrutGeom, chromeMat);
+            strut.position.set(armX, 0.73, 0.0);
+            chair.add(strut);
+
+            const armPad = new THREE.Mesh(armRestGeom, leatherMat);
+            armPad.position.set(armX, 0.88, 0.0);
+            armPad.castShadow = true;
+            chair.add(armPad);
+        });
+
+        if (!this.conferenceChairMaterials) this.conferenceChairMaterials = [];
+        this.conferenceChairMaterials.push(leatherMat);
 
         this.officeGroup.add(chair);
+        return chair;
     }
 
     createPottedPlant(x, z) {
@@ -2203,6 +2422,14 @@ class Office3D {
      */
     initRestSpots() {
         this.restSpots = [];
+        this.strollSpots = [
+            { id: 'spot_coffee_bar', name: 'Coffee Corner & Espresso Bar', x: 7.8, y: 0, z: 4.2, rotY: 0, holdingCup: true },
+            { id: 'spot_work_board', name: 'Board Rapat & Pengumuman', x: 0.0, y: 0, z: -4.2, rotY: 0, holdingCup: false },
+            { id: 'spot_meeting_view', name: 'Ruang Rapat & Kolaborasi (Glass View)', x: -3.0, y: 0, z: -4.2, rotY: -Math.PI / 2, holdingCup: false },
+            { id: 'spot_server_hub', name: 'Pusat Server & Tech Hub', x: 6.6, y: 0, z: -4.2, rotY: Math.PI / 2, holdingCup: false },
+            { id: 'spot_walkway_west', name: 'Lorong Utama Barat (Stroll)', x: -3.0, y: 0, z: 0.0, rotY: Math.PI / 4, holdingCup: false },
+            { id: 'spot_walkway_east', name: 'Lorong Utama Timur (Stroll)', x: 3.0, y: 0, z: 0.0, rotY: -Math.PI / 4, holdingCup: false }
+        ];
         this.sofaMaterials = [];
         const isLight = this.currentTheme === 'light';
 
@@ -2458,6 +2685,13 @@ class Office3D {
         }
         if (this.carpetMeeting) {
             this.carpetMeeting.material.color.setHex(isLight ? PALETTE.rugMeeting : 0x4a1f1c);
+        }
+        if (this.meetingTableTop) {
+            this.meetingTableTop.material.color.setHex(isLight ? PALETTE.wood : 0x334155);
+        }
+        if (this.conferenceChairMaterials) {
+            const chairLeather = isLight ? 0x2d343c : 0x222834;
+            this.conferenceChairMaterials.forEach(m => { if (m && m.color) m.color.setHex(chairLeather); });
         }
 
         // T5: Update grass ground
@@ -3111,7 +3345,7 @@ class Office3D {
             }
         };
 
-        if (agent.status === 'IDLE') {
+        if (agent.status === 'IDLE' || agent.status === 'PAUSED') {
             restSpot = this.getOrCreateRestSpotForAgent(id);
             agentUnit.navigation.restSpot = restSpot;
             agentUnit.navigation.state = 'RESTING';
@@ -3241,6 +3475,76 @@ class Office3D {
     }
 
     /**
+     * Applies natural standing idle/interaction posture while visiting office objects
+     */
+    applyVisitingObjectPose(agentUnit, strollSpot) {
+        const id = agentUnit.id;
+        const g = agentUnit.avatarGroup;
+
+        const spine = g.getObjectByName(`SpinePivot_${id}`);
+        const head = g.getObjectByName(`HeadPivot_${id}`);
+        const thighL = g.getObjectByName(`LeftThighPivot_${id}`);
+        const kneeL = g.getObjectByName(`LeftKneePivot_${id}`);
+        const thighR = g.getObjectByName(`RightThighPivot_${id}`);
+        const kneeR = g.getObjectByName(`RightKneePivot_${id}`);
+        const armL = g.getObjectByName(`LeftArmPivot_${id}`);
+        const elbowL = g.getObjectByName(`LeftElbowPivot_${id}`);
+        const armR = g.getObjectByName(`RightArmPivot_${id}`);
+        const elbowR = g.getObjectByName(`RightElbowPivot_${id}`);
+        const coffeeCup = g.getObjectByName(`CoffeeCup_${id}`);
+
+        g.position.y = 0;
+
+        if (thighL) thighL.rotation.set(0.04, 0, -0.04);
+        if (kneeL) kneeL.rotation.set(0.02, 0, 0);
+        if (thighR) thighR.rotation.set(-0.04, 0, 0.04);
+        if (kneeR) kneeR.rotation.set(0.02, 0, 0);
+
+        if (spine) {
+            spine.rotation.set(0.02, 0, 0);
+            spine.position.set(0, 0.58, 0);
+        }
+
+        if (strollSpot && strollSpot.holdingCup) {
+            // Standing holding coffee mug at coffee bar counter
+            if (armR) armR.rotation.set(-0.50, -0.15, 0.20);
+            if (elbowR) elbowR.rotation.set(-0.80, 0, 0);
+            if (armL) armL.rotation.set(0.05, 0, -0.12);
+            if (elbowL) elbowL.rotation.set(-0.25, 0, 0);
+            if (coffeeCup) coffeeCup.visible = true;
+            if (head) head.rotation.set(0.05, 0, 0);
+        } else {
+            // Thoughtfully observing board/screen/servers
+            if (armL) armL.rotation.set(0.08, 0, -0.12);
+            if (elbowL) elbowL.rotation.set(-0.25, 0, 0);
+            if (armR) armR.rotation.set(0.08, 0, 0.12);
+            if (elbowR) elbowR.rotation.set(-0.25, 0, 0);
+            if (coffeeCup) coffeeCup.visible = false;
+            if (head) head.rotation.set(-0.12, 0, 0);
+        }
+    }
+
+    /**
+     * Checks if an agent has finished all assigned tasks or is in standby/idle mode
+     */
+    isAgentTaskFinished(agent) {
+        if (!agent) return true;
+        if (agent.status === 'IDLE' || agent.status === 'PAUSED') return true;
+
+        if (typeof agent.pending_tasks_count !== 'undefined' && parseInt(agent.pending_tasks_count) === 0) {
+            return true;
+        }
+
+        if (agent.current_task) {
+            const t = agent.current_task.toLowerCase();
+            if (t.includes('selesai') || t.includes('standby') || t.includes('menunggu') || t.includes('istirahat') || t.includes('idle')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Updates an existing agent and handles WALKING TRANSITIONS between Desk & Rest Area!
      */
     updateAgentWorkstation(id, agent) {
@@ -3316,28 +3620,257 @@ class Office3D {
         const currentPhysicalState = nav.state;
         const targetStatus = agent.status;
 
-        const needsWalkToRest = targetStatus === 'IDLE' && (currentPhysicalState === 'WORKING' || currentPhysicalState === 'WALKING_TO_DESK');
-        const needsWalkToDesk = targetStatus === 'KERJA' && (currentPhysicalState === 'RESTING' || currentPhysicalState === 'WALKING_TO_REST');
+        const isRestTarget = targetStatus === 'IDLE' || targetStatus === 'PAUSED';
+        const isWorkTarget = targetStatus === 'KERJA';
+
+        const needsWalkToRest = isRestTarget && (currentPhysicalState === 'WORKING' || currentPhysicalState === 'WALKING_TO_DESK' || currentPhysicalState === 'VISITING_OBJECT' || currentPhysicalState === 'WALKING_TO_OBJECT');
+        const needsWalkToDesk = isWorkTarget && (currentPhysicalState === 'RESTING' || currentPhysicalState === 'WALKING_TO_REST' || currentPhysicalState === 'VISITING_OBJECT' || currentPhysicalState === 'WALKING_TO_OBJECT');
 
         if (needsWalkToRest) {
-            this.startAgentLocomotion(agentUnit, 'IDLE');
+            this.startAgentLocomotion(agentUnit, targetStatus);
         } else if (needsWalkToDesk) {
             this.startAgentLocomotion(agentUnit, 'KERJA');
         }
     }
 
     /**
-     * Initiates smooth live walking locomotion with intelligent office waypoints
+     * Returns bounding boxes for all office static obstacles (furniture, walls, equipment)
      */
-    startAgentLocomotion(agentUnit, targetStatus) {
+    getStaticObstacles(ignoreTargetId = null, currentAgentId = null) {
+        const list = [
+            // Center Low Planter Credenza Divider (x: [-0.34, 0.34], z: [1.1, 4.9])
+            { name: 'Planter Credenza', minX: -0.45, maxX: 0.45, minZ: 0.95, maxZ: 5.05 },
+            // Meeting Room Architectural Glass Enclosure
+            { name: 'Meeting Room', minX: -12.0, maxX: -3.4, minZ: -12.0, maxZ: -5.9 },
+            // Back Server Hub & Infrastructure
+            { name: 'Server Racks', minX: 6.6, maxX: 9.8, minZ: -11.5, maxZ: -9.5 },
+            // Coffee Bar Counter
+            { name: 'Coffee Counter', minX: 7.2, maxX: 10.4, minZ: 5.0, maxZ: 6.2 },
+            // Lounge Central Coffee Table
+            { name: 'Coffee Table', minX: 2.95, maxX: 4.65, minZ: 6.75, maxZ: 7.65 },
+            // Potted Plants
+            { name: 'Plant 1', minX: -11.0, maxX: -10.0, minZ: 4.0, maxZ: 5.0 },
+            { name: 'Plant 2', minX: 10.0, maxX: 11.0, minZ: -4.0, maxZ: -3.0 },
+            { name: 'Plant 3', minX: -2.0, maxX: -1.0, minZ: -10.0, maxZ: -9.0 },
+            { name: 'Plant 4', minX: -2.0, maxX: -1.0, minZ: 6.0, maxZ: 7.0 },
+        ];
+
+        // Lounge Seating Furniture (blocked unless character is sitting down on this specific item)
+        if (!ignoreTargetId || !ignoreTargetId.startsWith('sofa_front')) {
+            list.push({ name: 'Front Sofa', minX: 2.8, maxX: 4.8, minZ: 5.02, maxZ: 6.08 });
+        }
+        if (!ignoreTargetId || !ignoreTargetId.startsWith('sofa_main')) {
+            list.push({ name: 'Main Sofa', minX: 2.4, maxX: 5.2, minZ: 8.32, maxZ: 9.38 });
+        }
+        if (!ignoreTargetId || !ignoreTargetId.startsWith('sofa_armchair_left')) {
+            list.push({ name: 'Left Armchair', minX: 1.02, maxX: 2.08, minZ: 6.62, maxZ: 7.78 });
+        }
+        if (!ignoreTargetId || !ignoreTargetId.startsWith('sofa_armchair_right')) {
+            list.push({ name: 'Right Armchair', minX: 5.52, maxX: 6.58, minZ: 6.62, maxZ: 7.78 });
+        }
+
+        // Active Workstation Desks (w: 2.4 x d: 1.3)
+        // An agent's OWN desk must NEVER be an obstacle to themselves!
+        if (this.agents) {
+            this.agents.forEach(agentUnit => {
+                const aData = agentUnit.userData ? agentUnit.userData.agentData : null;
+                if (!aData) return;
+                const aId = agentUnit.id;
+                if (currentAgentId && aId === currentAgentId) return; // Always ignore own desk
+                if (ignoreTargetId && ignoreTargetId === `Desk_${aId}`) return;
+                const dx = parseFloat(aData.desk_x) || 0;
+                const dz = parseFloat(aData.desk_z) || 0;
+                list.push({
+                    name: `Desk_${aId}`,
+                    minX: dx - 1.25,
+                    maxX: dx + 1.25,
+                    minZ: dz - 0.70,
+                    maxZ: dz + 0.70
+                });
+            });
+        }
+
+        return list;
+    }
+
+    /**
+     * Smooth continuous collision resolver with tangential sliding along obstacle surfaces
+     */
+    resolveObstacleCollision(curPos, moveX, moveZ, radius = 0.28, ignoreTargetId = null, currentAgentId = null) {
+        const obstacles = this.getStaticObstacles(ignoreTargetId, currentAgentId);
+        const isBlocked = (x, z) => {
+            if (x < -11.5 || x > 11.5 || z < -11.5 || z > 11.5) return true;
+            for (let i = 0; i < obstacles.length; i++) {
+                const obs = obstacles[i];
+                if (x + radius > obs.minX && x - radius < obs.maxX &&
+                    z + radius > obs.minZ && z - radius < obs.maxZ) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const dist = Math.hypot(moveX, moveZ);
+        if (dist < 0.0001) return { x: curPos.x, z: curPos.z, moved: false };
+
+        const nextX = curPos.x + moveX;
+        const nextZ = curPos.z + moveZ;
+
+        // 1. Direct step
+        if (!isBlocked(nextX, nextZ)) {
+            return { x: nextX, z: nextZ, moved: true, evaded: false };
+        }
+
+        // 2. Whisker Evasion: search candidate angular departures to actively find an exit route around the obstacle
+        const baseAngle = Math.atan2(moveX, moveZ);
+        const angles = [
+            Math.PI / 8,   -Math.PI / 8,   // +-22.5 deg
+            Math.PI / 4,   -Math.PI / 4,   // +-45 deg
+            Math.PI * 3/8, -Math.PI * 3/8, // +-67.5 deg
+            Math.PI / 2,   -Math.PI / 2,   // +-90 deg (slide along obstacle surface)
+            Math.PI * 5/8, -Math.PI * 5/8  // +-112.5 deg (detour)
+        ];
+
+        for (let i = 0; i < angles.length; i++) {
+            const testAngle = baseAngle + angles[i];
+            const testX = curPos.x + Math.sin(testAngle) * dist;
+            const testZ = curPos.z + Math.cos(testAngle) * dist;
+            if (!isBlocked(testX, testZ)) {
+                return { x: testX, z: testZ, moved: true, evaded: true, angle: testAngle };
+            }
+        }
+
+        // 3. Single-axis sliding fallback
+        if (!isBlocked(nextX, curPos.z)) {
+            return { x: nextX, z: curPos.z, moved: true, evaded: true };
+        }
+        if (!isBlocked(curPos.x, nextZ)) {
+            return { x: curPos.x, z: nextZ, moved: true, evaded: true };
+        }
+
+        // 4. Blocked completely
+        return { x: curPos.x, z: curPos.z, moved: false, evaded: false };
+    }
+
+    /**
+     * Calculates guaranteed 100% collision-free corridor waypoints between desk and lounge
+     */
+    planAgentRoute(startPos, targetPos, mode, agentUnit, targetObject) {
+        const waypoints = [];
+        const spotId = targetObject ? (targetObject.id || '') : '';
+
+        // Step A: Getting onto the Central Walkway Spine (z = 0.0)
+        const onCentralWalkway = Math.abs(startPos.z - 0.0) < 0.25;
+
+        if (!onCentralWalkway) {
+            if (startPos.z > 5.0) {
+                // Coming from Lounge
+                if (spotId.startsWith('stool') && mode === 'KERJA') {
+                    waypoints.push(new THREE.Vector3(startPos.x, 0, 4.4));
+                    waypoints.push(new THREE.Vector3(6.6, 0, 4.4));
+                    waypoints.push(new THREE.Vector3(6.6, 0, 0.0));
+                } else {
+                    if (startPos.z > 8.0) {
+                        waypoints.push(new THREE.Vector3(startPos.x, 0, 7.95));
+                        waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
+                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    } else if (startPos.z > 6.5) {
+                        waypoints.push(new THREE.Vector3(2.45, 0, startPos.z));
+                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    } else {
+                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    }
+                    waypoints.push(new THREE.Vector3(0.0, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                }
+            } else if (Math.abs(startPos.z - (-4.2)) < 0.3) {
+                // Coming from Back Corridor
+                const transitX = startPos.x > 3.0 ? 6.6 : -3.0;
+                waypoints.push(new THREE.Vector3(transitX, 0, -4.2));
+                waypoints.push(new THREE.Vector3(transitX, 0, 0.0));
+            } else if (Math.abs(startPos.z - 4.2) < 0.3 && startPos.x > 6.0) {
+                // Coming from Coffee Bar Stroll Spot
+                waypoints.push(new THREE.Vector3(6.6, 0, 4.2));
+                waypoints.push(new THREE.Vector3(6.6, 0, 0.0));
+            } else {
+                // Coming from Desk chair
+                waypoints.push(new THREE.Vector3(startPos.x, 0, 0.0));
+            }
+        }
+
+        // Step B: Route from Central Walkway (z = 0.0) to Destination
+        if (mode === 'KERJA') {
+            // Going to Desk Seat
+            waypoints.push(new THREE.Vector3(targetPos.x, 0, 0.0));
+            waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+        } else if (mode === 'IDLE' || mode === 'TO_REST' || mode === true) {
+            // Going to Lounge
+            if (spotId.startsWith('stool')) {
+                waypoints.push(new THREE.Vector3(6.6, 0, 0.0));
+                waypoints.push(new THREE.Vector3(6.6, 0, 4.4));
+                waypoints.push(new THREE.Vector3(targetPos.x, 0, 4.4));
+                waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+            } else {
+                waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
+                waypoints.push(new THREE.Vector3(0.0, 0, 5.3));
+
+                if (spotId === 'sofa_front') {
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+                } else if (spotId === 'sofa_armchair_left') {
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 7.2));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+                } else if (spotId === 'sofa_armchair_right') {
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(5.1, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(5.1, 0, 7.2));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+                } else if (spotId.startsWith('sofa_main')) {
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+                } else {
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
+                }
+            }
+        } else if (mode === 'STROLL') {
+            // Going to Stroll Object
+            if (targetPos.z === -4.2) {
+                const transitX = targetPos.x > 3.0 ? 6.6 : -3.0;
+                waypoints.push(new THREE.Vector3(transitX, 0, 0.0));
+                waypoints.push(new THREE.Vector3(transitX, 0, -4.2));
+                waypoints.push(new THREE.Vector3(targetPos.x, 0, -4.2));
+            } else if (spotId === 'spot_coffee_bar') {
+                waypoints.push(new THREE.Vector3(6.6, 0, 0.0));
+                waypoints.push(new THREE.Vector3(6.6, 0, 4.2));
+                waypoints.push(new THREE.Vector3(targetPos.x, 0, 4.2));
+            } else {
+                // Along central walkway
+                waypoints.push(new THREE.Vector3(targetPos.x, 0, 0.0));
+            }
+        }
+
+        return waypoints;
+    }
+
+    /**
+     * Initiates smooth live walking locomotion with intelligent collision-free office waypoints
+     */
+    startAgentLocomotion(agentUnit, targetStatus, extraTarget = null) {
         const id = agentUnit.id;
         const agent = agentUnit.userData.agentData;
         const nav = agentUnit.navigation;
         const curPos = agentUnit.avatarGroup.position;
 
         // Prevent network race conditions or stale SSE from interrupting the walk
-        nav.lockUntil = Date.now() + 6500;
-        agent.status = targetStatus;
+        nav.lockUntil = Date.now() + 8500;
+        agent.status = targetStatus === 'STROLL' ? 'IDLE' : targetStatus;
 
         const deskX = parseFloat(agent.desk_x) || 0;
         const deskZ = parseFloat(agent.desk_z) || 0;
@@ -3359,50 +3892,51 @@ class Office3D {
         const head = agentUnit.avatarGroup.getObjectByName(`HeadPivot_${id}`);
         if (head) head.rotation.set(0, 0, 0);
 
-        if (targetStatus === 'IDLE') {
+        if (targetStatus === 'IDLE' || targetStatus === 'PAUSED') {
+            if (nav.targetSpot) nav.targetSpot = null;
             const restSpot = this.getOrCreateRestSpotForAgent(id);
             nav.restSpot = restSpot;
             nav.state = 'WALKING_TO_REST';
             nav.targetRot = restSpot.rotY;
 
-            // Collision-free corridor waypoints:
-            // 1. Move from desk chair into central hallway (x = 0)
-            // 2. Walk down central hallway to lounge threshold (x = 0, z = 5.2)
-            // 3. Enter lounge walkway (x = 1.6, z = 5.2)
-            // 4. Move directly to the assigned sofa chair
-            nav.waypoints = [
-                new THREE.Vector3(0, 0, curPos.z),
-                new THREE.Vector3(0, 0, 5.2),
-                new THREE.Vector3(1.6, 0, 5.2),
-                new THREE.Vector3(restSpot.x, 0, restSpot.z)
-            ];
+            nav.waypoints = this.planAgentRoute(curPos, new THREE.Vector3(restSpot.x, 0, restSpot.z), 'IDLE', agentUnit, restSpot);
             nav.waypointIndex = 0;
             nav.targetPos.copy(nav.waypoints[0]);
 
-            console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) mulai berjalan santai ke Lounge...`);
+            console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) santai sejenak berjalan ke Lounge...`);
+
+        } else if (targetStatus === 'STROLL') {
+            if (nav.restSpot) {
+                this.freeRestSpotForAgent(id);
+                nav.restSpot = null;
+            }
+            const strollSpot = extraTarget || this.strollSpots[Math.floor(Math.random() * this.strollSpots.length)];
+            nav.targetSpot = strollSpot;
+            nav.state = 'WALKING_TO_OBJECT';
+            nav.targetRot = strollSpot.rotY;
+
+            nav.waypoints = this.planAgentRoute(curPos, new THREE.Vector3(strollSpot.x, 0, strollSpot.z), 'STROLL', agentUnit, strollSpot);
+            nav.waypointIndex = 0;
+            nav.targetPos.copy(nav.waypoints[0]);
+
+            console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) berjalan-jalan santai ke ${strollSpot.name}...`);
 
         } else if (targetStatus === 'KERJA') {
-            this.freeRestSpotForAgent(id);
-            nav.restSpot = null;
+            const prevSpot = nav.restSpot || nav.targetSpot;
+            if (nav.restSpot) {
+                this.freeRestSpotForAgent(id);
+                nav.restSpot = null;
+            }
+            nav.targetSpot = null;
             const deskSeat = this.getDeskSeatTransform(deskX, deskZ, rotY);
             nav.state = 'WALKING_TO_DESK';
             nav.targetRot = deskSeat.rotY;
 
-            // Collision-free corridor waypoints back to desk:
-            // 1. Step to lounge walkway (x = 1.6, z = 5.2)
-            // 2. Step into central hallway (x = 0, z = 5.2)
-            // 3. Walk along central hallway up to desk row (x = 0, z = deskSeat.pos.z)
-            // 4. Move directly into desk chair
-            nav.waypoints = [
-                new THREE.Vector3(1.6, 0, 5.2),
-                new THREE.Vector3(0, 0, 5.2),
-                new THREE.Vector3(0, 0, deskSeat.pos.z),
-                new THREE.Vector3(deskSeat.pos.x, 0, deskSeat.pos.z)
-            ];
+            nav.waypoints = this.planAgentRoute(curPos, deskSeat.pos, 'KERJA', agentUnit, prevSpot);
             nav.waypointIndex = 0;
             nav.targetPos.copy(nav.waypoints[0]);
 
-            console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) mulai berjalan kembali ke Meja Kerja...`);
+            console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) kembali ke Meja Kerja melalui koridor aman...`);
         }
     }
 
@@ -3822,13 +4356,74 @@ class Office3D {
             if (this.selectedAgentId === id) {
                 this.selectionLight.position.x = avatarGroup.position.x;
                 this.selectionLight.position.z = avatarGroup.position.z;
-                if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK') {
+                if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT') {
                     this.targetLookAt.set(avatarGroup.position.x, 1.2, avatarGroup.position.z);
                 }
             }
 
+            // AUTONOMOUS LOUNGE & STROLL SCHEDULER FOR FINISHED / IDLE / PAUSED AGENTS
+            const isPaused = agent.status === 'PAUSED';
+            const isTaskDone = this.isAgentTaskFinished(agent);
+
+            // If agent is PAUSED, ensure their position is the Sofa Lounge!
+            if (isPaused) {
+                if (navigation.state !== 'RESTING' && navigation.state !== 'WALKING_TO_REST') {
+                    if (!navigation.lockUntil || Date.now() > navigation.lockUntil) {
+                        this.startAgentLocomotion(agentUnit, 'PAUSED');
+                    }
+                }
+            }
+            // If agent has active work assigned (and is NOT paused), return to desk immediately!
+            else if (!isTaskDone && (navigation.state === 'RESTING' || navigation.state === 'VISITING_OBJECT' || navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_OBJECT')) {
+                if (!navigation.lockUntil || Date.now() > navigation.lockUntil) {
+                    this.startAgentLocomotion(agentUnit, 'KERJA');
+                }
+            }
+            // If agent has finished tasks (and is NOT paused), autonomously stroll or relax in lounge periodically
+            else if (isTaskDone) {
+                if (!navigation.autonomousTimer) {
+                    navigation.autonomousTimer = 10.0 + (id * 5.0) % 18.0;
+                }
+
+                if (navigation.state === 'WORKING' || navigation.state === 'RESTING' || navigation.state === 'VISITING_OBJECT') {
+                    navigation.autonomousTimer -= delta;
+
+                    if (navigation.autonomousTimer <= 0) {
+                        if (navigation.state === 'WORKING') {
+                            // 60% chance Lounge, 40% chance stroll to another office object
+                            if (Math.random() < 0.60) {
+                                this.startAgentLocomotion(agentUnit, 'IDLE');
+                            } else {
+                                const randomSpot = this.strollSpots[Math.floor(Math.random() * this.strollSpots.length)];
+                                this.startAgentLocomotion(agentUnit, 'STROLL', randomSpot);
+                            }
+                            navigation.autonomousTimer = 25.0 + Math.random() * 25.0;
+                        } else if (navigation.state === 'RESTING') {
+                            // From lounge: 40% stroll to another object, 60% return to desk
+                            if (Math.random() < 0.40) {
+                                const randomSpot = this.strollSpots[Math.floor(Math.random() * this.strollSpots.length)];
+                                this.startAgentLocomotion(agentUnit, 'STROLL', randomSpot);
+                                navigation.autonomousTimer = 20.0 + Math.random() * 20.0;
+                            } else {
+                                this.startAgentLocomotion(agentUnit, 'KERJA');
+                                navigation.autonomousTimer = 20.0 + Math.random() * 25.0;
+                            }
+                        } else if (navigation.state === 'VISITING_OBJECT') {
+                            // From stroll object: 50% relax in lounge, 50% return to desk
+                            if (Math.random() < 0.50) {
+                                this.startAgentLocomotion(agentUnit, 'IDLE');
+                                navigation.autonomousTimer = 25.0 + Math.random() * 25.0;
+                            } else {
+                                this.startAgentLocomotion(agentUnit, 'KERJA');
+                                navigation.autonomousTimer = 20.0 + Math.random() * 25.0;
+                            }
+                        }
+                    }
+                }
+            }
+
             // 1. WALKING LOCOMOTION (Traveling between Workstation & Lounge with Waypoints)
-            if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK') {
+            if (navigation.state === 'WALKING_TO_REST' || navigation.state === 'WALKING_TO_DESK' || navigation.state === 'WALKING_TO_OBJECT') {
                 const curPos = avatarGroup.position;
                 let currentWp = navigation.targetPos;
 
@@ -3849,35 +4444,98 @@ class Office3D {
                     avatarGroup.rotation.y += diffAngle * Math.min(1.0, delta * 9.0);
 
                     // Move step forward
-                    const moveSpeed = 3.2; // comfortable walking speed
+                    // Base comfortable walking speed
+                    const moveSpeed = 3.0;
                     const step = Math.min(dist, moveSpeed * delta);
-                    curPos.x += (dx / dist) * step;
-                    curPos.z += (dz / dist) * step;
+                    let moveX = (dx / dist) * step;
+                    let moveZ = (dz / dist) * step;
 
-                    // Leg swing with natural knee flexion
-                    navigation.walkPhase += delta * 11.5;
-                    const legAngle = Math.sin(navigation.walkPhase) * 0.55;
-
-                    if (thighL) thighL.rotation.set(legAngle, 0, 0);
-                    if (kneeL) kneeL.rotation.set(legAngle < 0 ? -legAngle * 1.15 : 0.05, 0, 0);
-
-                    if (thighR) thighR.rotation.set(-legAngle, 0, 0);
-                    if (kneeR) kneeR.rotation.set(-legAngle < 0 ? legAngle * 1.15 : 0.05, 0, 0);
-
-                    // Arms swing opposite to legs with bent elbows
-                    if (armL) armL.rotation.set(-legAngle * 0.75, 0, -0.08);
-                    if (elbowL) elbowL.rotation.set(-0.35, 0, 0);
-
-                    if (armR) armR.rotation.set(legAngle * 0.75, 0, 0.08);
-                    if (elbowR) elbowR.rotation.set(-0.35, 0, 0);
-
-                    // Spine pelvis bob & sway
-                    curPos.y = Math.abs(Math.sin(navigation.walkPhase)) * 0.08;
-                    if (spine) {
-                        spine.rotation.set(0.04, Math.sin(navigation.walkPhase) * 0.08, 0);
-                        spine.position.set(0, 0.58, 0);
+                    // Multi-agent mutual separation avoidance
+                    if (this.agents) {
+                        this.agents.forEach(otherUnit => {
+                            if (otherUnit.id === id) return;
+                            const otherPos = otherUnit.avatarGroup.position;
+                            const sepDist = Math.hypot(curPos.x - otherPos.x, curPos.z - otherPos.z);
+                            if (sepDist > 0.001 && sepDist < 1.15) {
+                                const pushFactor = (1.15 - sepDist) * 1.5 * delta;
+                                moveX += ((curPos.x - otherPos.x) / sepDist) * pushFactor;
+                                moveZ += ((curPos.z - otherPos.z) / sepDist) * pushFactor;
+                            }
+                        });
                     }
-                    if (head) head.rotation.set(0, 0, 0);
+
+                    // Mascot Cat avoidance (gentle polite lateral steering)
+                    if (this.catGroup) {
+                        const catPos = this.catGroup.position;
+                        const catDist = Math.hypot(curPos.x - catPos.x, curPos.z - catPos.z);
+                        if (catDist > 0.001 && catDist < 1.25) {
+                            const catPush = (1.25 - catDist) * 1.8 * delta;
+                            moveX += ((curPos.x - catPos.x) / catDist) * catPush;
+                            moveZ += ((curPos.z - catPos.z) / catDist) * catPush;
+                        }
+                    }
+
+                    const prevX = curPos.x;
+                    const prevZ = curPos.z;
+
+                    // Robust obstacle collision sliding with Whisker Evasion & own desk clearance
+                    const ignoreTarget = (navigation.state === 'WALKING_TO_REST' && navigation.restSpot) ? navigation.restSpot.id : null;
+                    const resolved = this.resolveObstacleCollision(curPos, moveX, moveZ, 0.28, ignoreTarget, id);
+                    curPos.x = resolved.x;
+                    curPos.z = resolved.z;
+
+                    // Measure actual spatial displacement to prevent walking in place
+                    const actualDist = Math.hypot(curPos.x - prevX, curPos.z - prevZ);
+
+                    if (actualDist > 0.001) {
+                        navigation.stuckTimer = 0;
+                        // Leg swing only when character actually moves forward
+                        navigation.walkPhase += delta * 11.5;
+                        const legAngle = Math.sin(navigation.walkPhase) * 0.55;
+
+                        if (thighL) thighL.rotation.set(legAngle, 0, 0);
+                        if (kneeL) kneeL.rotation.set(legAngle < 0 ? -legAngle * 1.15 : 0.05, 0, 0);
+
+                        if (thighR) thighR.rotation.set(-legAngle, 0, 0);
+                        if (kneeR) kneeR.rotation.set(-legAngle < 0 ? legAngle * 1.15 : 0.05, 0, 0);
+
+                        // Arms swing opposite to legs with bent elbows
+                        if (armL) armL.rotation.set(-legAngle * 0.75, 0, -0.08);
+                        if (elbowL) elbowL.rotation.set(-0.35, 0, 0);
+
+                        if (armR) armR.rotation.set(legAngle * 0.75, 0, 0.08);
+                        if (elbowR) elbowR.rotation.set(-0.35, 0, 0);
+
+                        // Spine pelvis bob & sway
+                        curPos.y = Math.abs(Math.sin(navigation.walkPhase)) * 0.08;
+                        if (spine) {
+                            spine.rotation.set(0.04, Math.sin(navigation.walkPhase) * 0.08, 0);
+                            spine.position.set(0, 0.58, 0);
+                        }
+                        if (head) head.rotation.set(0, 0, 0);
+                    } else {
+                        // Character blocked by obstacle: DO NOT walk in place!
+                        curPos.y = 0;
+                        if (thighL) thighL.rotation.set(0, 0, 0);
+                        if (kneeL) kneeL.rotation.set(0, 0, 0);
+                        if (thighR) thighR.rotation.set(0, 0, 0);
+                        if (kneeR) kneeR.rotation.set(0, 0, 0);
+                        if (armL) armL.rotation.set(0, 0, 0);
+                        if (armR) armR.rotation.set(0, 0, 0);
+
+                        // Anti-Stuck Watchdog: automatically look for an exit or advance waypoint
+                        navigation.stuckTimer = (navigation.stuckTimer || 0) + delta;
+                        if (navigation.stuckTimer > 0.8) {
+                            if (navigation.waypoints && navigation.waypointIndex < navigation.waypoints.length - 1) {
+                                navigation.waypointIndex++;
+                                console.log(`[Kantor Virtual 3D] Agent #${id} mencari jalan keluar (advance waypoint ke #${navigation.waypointIndex})`);
+                            } else {
+                                curPos.x = currentWp.x;
+                                curPos.z = currentWp.z;
+                            }
+                            navigation.stuckTimer = 0;
+                        }
+                    }
 
                 } else {
                     // Check next waypoint
@@ -3894,6 +4552,9 @@ class Office3D {
                         if (navigation.state === 'WALKING_TO_REST') {
                             navigation.state = 'RESTING';
                             this.applySofaSittingPose(agentUnit);
+                        } else if (navigation.state === 'WALKING_TO_OBJECT') {
+                            navigation.state = 'VISITING_OBJECT';
+                            this.applyVisitingObjectPose(agentUnit, navigation.targetSpot);
                         } else {
                             navigation.state = 'WORKING';
                             this.applyDeskSittingPose(agentUnit);
@@ -3923,6 +4584,38 @@ class Office3D {
                 } else {
                     if (armR) armR.rotation.x = -0.45;
                     if (elbowR) elbowR.rotation.x = -0.75;
+                }
+            }
+
+            // 2b. VISITING OBJECT STATE (Interacting with Coffee Bar, Whiteboard, Meeting Glass, etc.)
+            else if (navigation.state === 'VISITING_OBJECT') {
+                const spot = navigation.targetSpot;
+                curPos.y = 0;
+
+                if (spine) {
+                    spine.rotation.z = Math.sin(elapsedTime * 0.9 + id) * 0.02;
+                    spine.position.y = 0.58 + Math.sin(elapsedTime * 2.0 + id) * 0.01;
+                }
+
+                if (spot && spot.holdingCup) {
+                    // Periodic coffee sipping motion at espresso counter
+                    const sipPhase = (elapsedTime + id * 2.0) % 7.5;
+                    if (sipPhase > 5.5 && sipPhase < 7.0) {
+                        const sipLift = Math.sin(((sipPhase - 5.5) / 1.5) * Math.PI);
+                        if (armR) armR.rotation.x = -0.50 - sipLift * 0.35;
+                        if (elbowR) elbowR.rotation.x = -0.80 - sipLift * 0.25;
+                        if (head) head.rotation.x = 0.05 - sipLift * 0.12;
+                    } else {
+                        if (armR) armR.rotation.x = -0.50;
+                        if (elbowR) elbowR.rotation.x = -0.80;
+                        if (head) head.rotation.x = 0.05;
+                    }
+                } else {
+                    // Looking around thoughtfully at notice board or meeting room
+                    if (head) {
+                        head.rotation.y = Math.sin(elapsedTime * 0.7 + id) * 0.28;
+                        head.rotation.x = -0.10 + Math.sin(elapsedTime * 1.1 + id) * 0.05;
+                    }
                 }
             }
 

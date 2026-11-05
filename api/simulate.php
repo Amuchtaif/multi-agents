@@ -128,12 +128,21 @@ try {
             $linkedTaskId = (int)$activeTaskRow['id'];
         } elseif (empty($taskTitle) || $taskTitle === 'Menunggu penugasan' || $taskTitle === 'Menunggu instruksi tugas') {
             // Assign a natural research topic based on role and department
-            $defaultTopics = [
+                        $defaultTopics = [
                 'Analyst' => 'Riset komparatif arsitektur 3D HQ & optimasi backlog orchestrator',
                 'Frontend' => 'Riset optimasi Three.js isometric rendering & kontras tema',
                 'Backend' => 'Riset event-driven streaming SSE & connection pool resilience',
                 'QA' => 'Automasi regression testing multi-agent CRUD endpoint',
-                'Research' => 'Benchmark prompt efficiency & context memory compaction'
+                'Research' => 'Benchmark prompt efficiency & context memory compaction',
+                'Media Sosial' => 'Analisis tren viral, copywriting reels/tiktok & engagement metrik',
+                'Sosial' => 'Penyusunan kalender konten media sosial & strategi pertumbuhan audiens',
+                'Konten' => 'Produksi draft copy artikel, storyboard visual & narasi brand',
+                'Content' => 'Riset topik trending, kurasi aset visual & optimasi copywriting',
+                'Brainstorming' => 'Eksplorasi ide kreatif, mind-mapping inovasi & konsep kampanye',
+                'Ideation' => 'Penyusunan hipotesis eksperimen produk & matriks prioritas solusi',
+                'Pemasaran' => 'Analisis performa kampanye multi-channel & konversi funnel',
+                'Marketing' => 'Optimasi strategi akuisisi pengguna & evaluasi metrik retensi',
+                'Desain' => 'Eksplorasi palet warna UI, prototipe grafis & aset interaktif'
             ];
             $taskTitle = 'Riset eksplorasi fitur dan analisis arsitektur sistem';
             foreach ($defaultTopics as $roleKey => $topic) {

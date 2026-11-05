@@ -444,22 +444,64 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Role / Jabatan *</label>
-                        <input type="text" name="role" required placeholder="Contoh: DevOps Specialist" 
+                        <input type="text" name="role" required placeholder="Contoh: Social Media Specialist, Content Creator, DevOps..." 
                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
                     </div>
                 </div>
 
-                <!-- Department & Model -->
+                                <!-- Department & Model -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Departemen</label>
-                        <select name="department" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
-                            <option value="Frontend Engineering">Frontend Engineering</option>
-                            <option value="Core Platform & API">Core Platform & API</option>
-                            <option value="Quality Assurance">Quality Assurance</option>
-                            <option value="Research & Intelligence">Research & Intelligence</option>
-                            <option value="Operations & DevOps">Operations & DevOps</option>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                <i class="fa-solid fa-briefcase text-blue-500 mr-1"></i> Departemen *
+                            </label>
+                            <button type="button" onclick="window.app && window.app.showNewDepartmentInput()" class="text-[11px] text-blue-600 dark:text-cyan-400 hover:underline font-medium flex items-center gap-1 transition-colors">
+                                <i class="fa-solid fa-plus text-[10px]"></i> Departemen Baru
+                            </button>
+                        </div>
+                        <select id="agent-department-select" name="department" onchange="window.app && window.app.handleDepartmentChange(this.value)" class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/15 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500 shadow-sm">
+                            <optgroup label="✨ Spesialis Konten, Media & Kreatif">
+                                <option value="Spesialis Media Sosial" selected>Spesialis Media Sosial</option>
+                                <option value="Pembuatan Konten">Pembuatan Konten (Content Creation)</option>
+                                <option value="Brainstorming & Ideation">Brainstorming & Ideation</option>
+                                <option value="Pemasaran Digital & Kampanye">Pemasaran Digital & Kampanye</option>
+                                <option value="Desain Kreatif & Multimedia">Desain Kreatif & Multimedia</option>
+                            </optgroup>
+                            <optgroup label="💻 Teknologi & Engineering">
+                                <option value="Frontend Engineering">Frontend Engineering</option>
+                                <option value="Core Platform & API">Core Platform & API</option>
+                                <option value="Quality Assurance">Quality Assurance</option>
+                                <option value="Operations & DevOps">Operations & DevOps</option>
+                                <option value="Arsitektur Cloud & Keamanan">Arsitektur Cloud & Keamanan</option>
+                            </optgroup>
+                            <optgroup label="📊 Riset, Data & Strategi">
+                                <option value="Research & Intelligence">Research & Intelligence</option>
+                                <option value="Analisis Data & Riset Pasar">Analisis Data & Riset Pasar</option>
+                                <option value="Manajemen Produk & Strategi">Manajemen Produk & Strategi</option>
+                            </optgroup>
+                            <optgroup id="optgroup-custom-departments" label="🏷️ Departemen Kustom">
+                                <!-- Populated dynamically -->
+                            </optgroup>
+                            <option value="__new__" class="font-semibold text-blue-600 dark:text-cyan-400 bg-blue-50/50 dark:bg-blue-950/30">➕ Tambah Departemen Baru...</option>
                         </select>
+
+                        <!-- Input Tambah Departemen Baru -->
+                        <div id="custom-department-container" class="hidden mt-2 p-2.5 bg-blue-50/60 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-500/30">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-[11px] font-semibold text-blue-700 dark:text-cyan-400">
+                                    <i class="fa-solid fa-folder-plus mr-1"></i>Nama Departemen Baru *
+                                </label>
+                                <button type="button" onclick="window.app && window.app.cancelNewDepartmentInput()" class="text-[10px] text-slate-400 hover:text-red-500 transition-colors flex items-center gap-0.5">
+                                    <i class="fa-solid fa-xmark"></i> Batal
+                                </button>
+                            </div>
+                            <div class="relative flex items-center">
+                                <input type="text" id="custom-department-input" placeholder="Contoh: Media Sosial, Brainstorming, Public Relations..." 
+                                       class="w-full bg-white dark:bg-slate-900 border border-blue-400 dark:border-blue-500 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 shadow-sm">
+                            </div>
+                            <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Departemen baru ini akan tersimpan otomatis dan bisa dipilih kembali.</p>
+                        </div>
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Model AI</label>
