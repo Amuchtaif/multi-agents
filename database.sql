@@ -100,3 +100,30 @@ INSERT INTO `agent_logs` (`agent_id`, `log_type`, `message`, `details_json`, `cr
 (4, 'tool_call', 'web_search: "Antigravity multi-agent communication protocol latency"', '{"results_count": 8}', DATE_SUB(NOW(), INTERVAL 2 MINUTE)),
 (3, 'action', 'Menunggu pemicu pengujian integrasi selanjutnya (Status: IDLE di stasiun QA)', '{"idle_since": "10m"}', DATE_SUB(NOW(), INTERVAL 1 MINUTE));
 
+-- 9. Meetings Table (War Room & Autonomous Team Meeting)
+CREATE TABLE IF NOT EXISTS `meetings` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `topic` TEXT NOT NULL,
+    `status` ENUM('in_progress', 'completed', 'cancelled') NOT NULL DEFAULT 'in_progress',
+    `participants_json` TEXT NULL,
+    `summary` TEXT NULL,
+    `action_items_json` TEXT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX (`status`),
+    INDEX (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. Meeting Messages Table
+CREATE TABLE IF NOT EXISTS `meeting_messages` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `meeting_id` INT NOT NULL,
+    `agent_id` INT NOT NULL,
+    `round_number` INT NOT NULL DEFAULT 1,
+    `message` TEXT NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (`meeting_id`),
+    INDEX (`agent_id`),
+    CONSTRAINT `fk_meeting_msg` FOREIGN KEY (`meeting_id`) REFERENCES `meetings` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

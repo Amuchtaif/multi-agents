@@ -1676,12 +1676,12 @@ class Office3D {
                 new THREE.Vector3(-3.0, 0, 0.0),   // Central walkway west
                 new THREE.Vector3(-3.0, 0, 5.3),   // West lounge transit aisle
                 new THREE.Vector3(0.0, 0, 5.3),    // Lounge threshold
-                new THREE.Vector3(2.45, 0, 5.3),   // Lounge west seating entry
+                new THREE.Vector3(2.45, 0, 5.6),   // Lounge west seating entry
                 new THREE.Vector3(2.45, 0, 7.2),   // In front of left armchair
                 new THREE.Vector3(2.45, 0, 7.95),  // Lounge rug corner
                 new THREE.Vector3(3.8, 0, 7.95),   // In front of main sofa
                 new THREE.Vector3(2.45, 0, 7.95),  // Lounge rug corner
-                new THREE.Vector3(2.45, 0, 5.3),   // Lounge west seating entry
+                new THREE.Vector3(2.45, 0, 5.6),   // Lounge west seating entry
                 new THREE.Vector3(0.0, 0, 5.3),    // Lounge threshold
                 new THREE.Vector3(-3.0, 0, 5.3),   // West lounge transit aisle
                 new THREE.Vector3(-3.0, 0, 0.0)    // Central walkway west
@@ -1951,16 +1951,23 @@ class Office3D {
             { cx: x + 1.40, cz: z + 1.36, rotY: Math.PI + 0.10 }
         ];
 
-        this.meetingSpots = chairConfigs.map((cfg, idx) => ({
-            id: `meet_chair_${idx}`,
-            name: `Kursi Konferensi #${idx + 1}`,
-            x: cfg.cx,
-            y: 0,
-            z: cfg.cz,
-            rotY: cfg.rotY,
-            taken: false,
-            agentId: null
-        }));
+        this.meetingSpots = chairConfigs.map((cfg, idx) => {
+            // Local offset: nestled into chair backrest with perfect height atop cushion
+            const seatOffset = new THREE.Vector3(0, 0, -0.06);
+            seatOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), cfg.rotY);
+            return {
+                id: `meet_chair_${idx}`,
+                name: `Kursi Konferensi #${idx + 1}`,
+                chairX: cfg.cx,
+                chairZ: cfg.cz,
+                x: cfg.cx + seatOffset.x,
+                y: 0.20,
+                z: cfg.cz + seatOffset.z,
+                rotY: cfg.rotY,
+                taken: false,
+                agentId: null
+            };
+        });
 
         chairConfigs.forEach(cfg => {
             this.createConferenceChair(cfg.cx, cfg.cz, cfg.rotY);
@@ -3597,7 +3604,8 @@ class Office3D {
         const elbowR = g.getObjectByName(`RightElbowPivot_${id}`);
         const coffeeCup = g.getObjectByName(`CoffeeCup_${id}`);
 
-        g.position.y = 0.08;
+        // Height calibrated so pelvis sit bones rest perfectly atop chair cushion surface (y = 0.66)
+        g.position.y = 0.20;
 
         if (thighL) thighL.rotation.set(-Math.PI / 2, 0, 0);
         if (kneeL) kneeL.rotation.set(Math.PI / 2, 0, 0);
@@ -3605,17 +3613,17 @@ class Office3D {
         if (kneeR) kneeR.rotation.set(Math.PI / 2, 0, 0);
 
         if (spine) {
-            spine.rotation.set(0.04, 0, 0);
+            spine.rotation.set(0.06, 0, 0);
             spine.position.set(0, 0.58, 0);
         }
 
-        if (head) head.rotation.set(-0.05, 0, 0);
+        if (head) head.rotation.set(-0.04, 0, 0);
 
-        // Arms resting attentively on conference table
-        if (armL) armL.rotation.set(-0.65, 0.15, 0.05);
-        if (elbowL) elbowL.rotation.set(-0.55, 0, 0);
-        if (armR) armR.rotation.set(-0.65, -0.15, -0.05);
-        if (elbowR) elbowR.rotation.set(-0.55, 0, 0);
+        // Forearms and hands resting naturally flat on top of the conference table surface (table top = 1.15)
+        if (armL) armL.rotation.set(-0.95, 0.18, 0.10);
+        if (elbowL) elbowL.rotation.set(-0.85, 0, 0);
+        if (armR) armR.rotation.set(-0.95, -0.18, -0.10);
+        if (elbowR) elbowR.rotation.set(-0.85, 0, 0);
 
         if (coffeeCup) coffeeCup.visible = false;
     }
@@ -3924,24 +3932,42 @@ class Office3D {
                 waypoints.push(new THREE.Vector3(-3.0, 0, -5.5));
                 waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
             } else if (startPos.z > 5.0) {
-                // Coming from Lounge
-                if (spotId.startsWith('stool') && mode === 'KERJA') {
+                // Coming from Lounge: guaranteed collision-free departure around coffee table & planter
+                if (spotId.startsWith('stool')) {
                     waypoints.push(new THREE.Vector3(startPos.x, 0, 4.4));
                     waypoints.push(new THREE.Vector3(6.6, 0, 4.4));
                     waypoints.push(new THREE.Vector3(6.6, 0, 0.0));
+                } else if (spotId === 'sofa_armchair_right' || startPos.x > 5.0) {
+                    // Right armchair / east lounge: navigate around central coffee table via rear/top aisle
+                    waypoints.push(new THREE.Vector3(5.1, 0, 7.2));
+                    waypoints.push(new THREE.Vector3(5.1, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(0.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                } else if (spotId.startsWith('sofa_main') || startPos.z > 8.0) {
+                    // Main sofa (top / back side): step forward to clear sofa then into west aisle
+                    waypoints.push(new THREE.Vector3(startPos.x, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(0.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
+                } else if (spotId === 'sofa_front') {
+                    // Front sofa: step forward toward coffee table clear zone, then turn into west aisle
+                    waypoints.push(new THREE.Vector3(3.8, 0, 6.35));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 6.35));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(0.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 } else {
-                    if (startPos.z > 8.0) {
-                        waypoints.push(new THREE.Vector3(startPos.x, 0, 7.95));
-                        waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
-                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
-                    } else if (startPos.z > 6.5) {
-                        waypoints.push(new THREE.Vector3(2.45, 0, startPos.z));
-                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
-                    } else {
-                        waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
-                    }
-                    waypoints.push(new THREE.Vector3(0.0, 0, 5.3));
-                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
+                    // Left armchair or west lounge reading spots
+                    waypoints.push(new THREE.Vector3(2.45, 0, startPos.z));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(0.0, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(-3.0, 0, 5.6));
                     waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 }
             } else if (Math.abs(startPos.z - (-4.2)) < 0.3) {
@@ -3973,29 +3999,31 @@ class Office3D {
                 waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
             } else {
                 waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
-                waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
-                waypoints.push(new THREE.Vector3(0.0, 0, 5.3));
+                waypoints.push(new THREE.Vector3(-3.0, 0, 5.6));
+                waypoints.push(new THREE.Vector3(0.0, 0, 5.6));
 
                 if (spotId === 'sofa_front') {
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 6.35));
+                    waypoints.push(new THREE.Vector3(targetPos.x, 0, 6.35));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
                 } else if (spotId === 'sofa_armchair_left') {
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
                     waypoints.push(new THREE.Vector3(2.45, 0, 7.2));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
                 } else if (spotId === 'sofa_armchair_right') {
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
                     waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
                     waypoints.push(new THREE.Vector3(5.1, 0, 7.95));
                     waypoints.push(new THREE.Vector3(5.1, 0, 7.2));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
                 } else if (spotId.startsWith('sofa_main')) {
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
                     waypoints.push(new THREE.Vector3(2.45, 0, 7.95));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, 7.95));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
                 } else {
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
                     waypoints.push(new THREE.Vector3(targetPos.x, 0, targetPos.z));
                 }
             }
@@ -4043,7 +4071,7 @@ class Office3D {
         const coffeeCup = agentUnit.avatarGroup.getObjectByName(`CoffeeCup_${id}`);
         if (coffeeCup) coffeeCup.visible = false;
 
-        // Reset spine & head to upright walking posture
+        // Reset spine, head, legs & arms to upright walking posture immediately
         const spine = agentUnit.avatarGroup.getObjectByName(`SpinePivot_${id}`);
         if (spine) {
             spine.rotation.set(0, 0, 0);
@@ -4051,6 +4079,23 @@ class Office3D {
         }
         const head = agentUnit.avatarGroup.getObjectByName(`HeadPivot_${id}`);
         if (head) head.rotation.set(0, 0, 0);
+
+        const thighL = agentUnit.avatarGroup.getObjectByName(`LeftThighPivot_${id}`);
+        const kneeL = agentUnit.avatarGroup.getObjectByName(`LeftKneePivot_${id}`);
+        const thighR = agentUnit.avatarGroup.getObjectByName(`RightThighPivot_${id}`);
+        const kneeR = agentUnit.avatarGroup.getObjectByName(`RightKneePivot_${id}`);
+        const armL = agentUnit.avatarGroup.getObjectByName(`LeftArmPivot_${id}`);
+        const elbowL = agentUnit.avatarGroup.getObjectByName(`LeftElbowPivot_${id}`);
+        const armR = agentUnit.avatarGroup.getObjectByName(`RightArmPivot_${id}`);
+        const elbowR = agentUnit.avatarGroup.getObjectByName(`RightElbowPivot_${id}`);
+        if (thighL) thighL.rotation.set(0, 0, 0);
+        if (kneeL) kneeL.rotation.set(0, 0, 0);
+        if (thighR) thighR.rotation.set(0, 0, 0);
+        if (kneeR) kneeR.rotation.set(0, 0, 0);
+        if (armL) armL.rotation.set(0, 0, 0);
+        if (elbowL) elbowL.rotation.set(0, 0, 0);
+        if (armR) armR.rotation.set(0, 0, 0);
+        if (elbowR) elbowR.rotation.set(0, 0, 0);
 
         if (targetStatus === 'IDLE' || targetStatus === 'PAUSED') {
             if (nav.targetSpot) nav.targetSpot = null;
@@ -4082,7 +4127,18 @@ class Office3D {
             console.log(`[Kantor Virtual 3D] Agent #${id} (${agent.name}) berjalan-jalan santai ke ${strollSpot.name}...`);
 
         } else if (targetStatus === 'KERJA') {
-            const prevSpot = nav.restSpot || nav.targetSpot;
+            const prevSpot = nav.restSpot || nav.targetSpot || nav.meetingSpot;
+            if (nav.restSpot) {
+                this.freeRestSpotForAgent(id);
+                nav.restSpot = null;
+            }
+            if (nav.meetingSpot) {
+                nav.meetingSpot.taken = false;
+                nav.meetingSpot.agentId = null;
+                nav.meetingSpot = null;
+            }
+            nav.targetSpot = null;
+            nav.departingSpotId = prevSpot ? prevSpot.id : null;
             if (nav.restSpot) {
                 this.freeRestSpotForAgent(id);
                 nav.restSpot = null;
@@ -4111,7 +4167,7 @@ class Office3D {
                 // 1. Smooth path to central spine (z = 0.0) avoiding lounge furniture or desks
                 if (curPos.z > 5.0) {
                     // Coming from Lounge
-                    waypoints.push(new THREE.Vector3(2.45, 0, 5.3));
+                    waypoints.push(new THREE.Vector3(2.45, 0, 5.6));
                     waypoints.push(new THREE.Vector3(-3.0, 0, 5.3));
                     waypoints.push(new THREE.Vector3(-3.0, 0, 0.0));
                 } else if (curPos.z < -2.0) {
@@ -4786,9 +4842,18 @@ class Office3D {
                     const prevZ = curPos.z;
 
                     // Robust obstacle collision sliding with Whisker Evasion & own desk clearance
-                    const ignoreTarget = (navigation.state === 'WALKING_TO_REST' && navigation.restSpot) 
+                    let ignoreTarget = (navigation.state === 'WALKING_TO_REST' && navigation.restSpot) 
                         ? navigation.restSpot.id 
                         : ((navigation.state === 'WALKING_TO_MEETING' && navigation.meetingSpot) ? navigation.meetingSpot.id : null);
+
+                    // Ignore departing furniture obstacle until agent has cleared the departure zone
+                    if (!ignoreTarget && navigation.departingSpotId) {
+                        if (curPos.z > 5.2 || (curPos.z < -5.5 && curPos.x < -3.2)) {
+                            ignoreTarget = navigation.departingSpotId;
+                        } else {
+                            navigation.departingSpotId = null;
+                        }
+                    }
                     const resolved = this.resolveObstacleCollision(curPos, moveX, moveZ, 0.28, ignoreTarget, id);
                     curPos.x = resolved.x;
                     curPos.z = resolved.z;
@@ -4933,18 +4998,19 @@ class Office3D {
 
             // 2c. IN_MEETING STATE (Attentive discussion in War Room)
             else if (navigation.state === 'IN_MEETING') {
-                curPos.y = 0.08;
+                curPos.y = 0.20; // Exact seat cushion surface height
                 if (spine) {
-                    spine.rotation.z = Math.sin(elapsedTime * 0.7 + id) * 0.02;
-                    spine.rotation.x = 0.04 + Math.sin(elapsedTime * 1.2 + id) * 0.02;
+                    spine.rotation.z = Math.sin(elapsedTime * 0.7 + id) * 0.015;
+                    spine.rotation.x = 0.06 + Math.sin(elapsedTime * 1.2 + id) * 0.015;
                 }
                 if (head) {
                     // Attentive head movement towards TV or speakers
-                    head.rotation.y = Math.sin(elapsedTime * 0.8 + id * 1.5) * 0.22;
-                    head.rotation.x = -0.05 + Math.sin(elapsedTime * 1.6 + id) * 0.03;
+                    head.rotation.y = Math.sin(elapsedTime * 0.8 + id * 1.5) * 0.20;
+                    head.rotation.x = -0.04 + Math.sin(elapsedTime * 1.6 + id) * 0.025;
                 }
-                if (armL) armL.rotation.set(-0.65 + Math.sin(elapsedTime * 1.1 + id) * 0.03, 0.15, 0.05);
-                if (armR) armR.rotation.set(-0.65 + Math.cos(elapsedTime * 1.3 + id) * 0.03, -0.15, -0.05);
+                // Forearms resting on conference table with subtle organic micro-movements
+                if (armL) armL.rotation.set(-0.95 + Math.sin(elapsedTime * 1.1 + id) * 0.02, 0.18, 0.10);
+                if (armR) armR.rotation.set(-0.95 + Math.cos(elapsedTime * 1.3 + id) * 0.02, -0.18, -0.10);
             }
 
             // 3. WORKING STATE (At Workstation Desk)

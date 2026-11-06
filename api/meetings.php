@@ -10,6 +10,38 @@ require_once __DIR__ . '/ai_service.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
+// Self-healing: ensure meetings tables exist before any query runs
+ensureMeetingTables($pdo);
+
+function ensureMeetingTables(PDO $pdo) {
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `meetings` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `title` VARCHAR(255) NOT NULL,
+            `topic` TEXT NOT NULL,
+            `status` ENUM('in_progress', 'completed', 'cancelled') NOT NULL DEFAULT 'in_progress',
+            `participants_json` TEXT NULL,
+            `summary` TEXT NULL,
+            `action_items_json` TEXT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX (`status`),
+            INDEX (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `meeting_messages` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `meeting_id` INT NOT NULL,
+            `agent_id` INT NOT NULL,
+            `round_number` INT NOT NULL DEFAULT 1,
+            `message` TEXT NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX (`meeting_id`),
+            INDEX (`agent_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (Exception $e) {}
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $input = getJsonInput();
 
